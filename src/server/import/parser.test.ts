@@ -335,7 +335,28 @@ describe("delivery date", () => {
       expect(r.lines[0]?.kind, line).toBe("items");
     }
     expect(parse("მიწოდება 3 მარტამდე").desiredDate?.value).toBe("2027-03-03");
-    expect(parse("15 ნოემბერს").desiredDate?.value).toBe("2027-11-15");
+    // Passed yesterday: stays this year and is flagged, instead of silently becoming next year.
+    expect(parse("15 ნოემბერს").desiredDate).toMatchObject({
+      value: "2026-11-15",
+      flags: ["past"],
+    });
+  });
+
+  it("gives skipped lines their text without the WhatsApp header, for adding as an item", () => {
+    const l = parse("[16.11.26, 09:15] ნიკა: - ცემენტიც გვინდა 🙏").lines[0]!;
+    expect(l).toMatchObject({ kind: "skipped", content: "ცემენტიც გვინდა" });
+  });
+
+  it("code review: years, kilometres, detached units, size lists", () => {
+    expect(parse("14 ნოემბრამდე ცემენტი 5 ტომარა").desiredDate?.flags).toEqual(["past"]);
+    expect(parse("5 იანვრამდე").desiredDate).toMatchObject({ value: "2027-01-05", flags: [] });
+    expect(one("კაბელი 2 კილომეტრი").unit).not.toBe("კგ");
+    expect(one("ლურსმანი 5 კილო").unit).toBe("კგ");
+    expect(one("გამანაწილებელი ყუთი 10")).toMatchObject({ unit: "ყუთი", flags: ["unit"] });
+    const sizes = parse("არმატურა 10/12/14");
+    expect(sizes.desiredDate).toBeNull();
+    expect(sizes.lines[0]?.kind).toBe("skipped");
+    expect(parse("მიწოდება 20.11.26").desiredDate?.value).toBe("2026-11-20");
   });
 
   it("does not treat a bare d.m next to a list header as a date", () => {

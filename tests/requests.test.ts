@@ -434,3 +434,40 @@ describe("review safety (code review findings)", () => {
     });
   });
 });
+
+describe("list filters (code review findings)", () => {
+  it("filters open requests and my own, and clamps an out-of-range page", async () => {
+    const mine = await createRequest(requester, newRequest());
+    await submitRequest(requester, mine.id);
+    const draft = await createRequest(admin, newRequest());
+    expect((await listRequests(admin, { status: "OPEN" })).rows.map((r) => r.id)).toEqual([
+      mine.id,
+    ]);
+    expect((await listRequests(admin, { mine: "1" })).rows.map((r) => r.id)).toEqual([draft.id]);
+    expect((await listRequests(requester, { status: "DRAFT", mine: "1" })).total).toBe(0);
+    const far = await listRequests(admin, { page: "9" });
+    expect(far.page).toBe(1);
+    expect(far.rows).toHaveLength(2);
+  });
+});
+
+describe("access on every write (code review findings)", () => {
+  it("refuses other projects and organizations on each request transition", async () => {
+    const r = await createRequest(requester, newRequest());
+    for (const [who, code] of [
+      [outsider, "FORBIDDEN"],
+      [otherOrgAdmin, "NOT_FOUND"],
+    ] as const) {
+      await expectAppError(updateRequest(who, r.id, { items }), code);
+      await expectAppError(submitRequest(who, r.id), code);
+      await expectAppError(cancelRequest(who, r.id, "უცხო"), code);
+    }
+    await submitRequest(requester, r.id);
+    await expectAppError(withdrawRequest(outsider, r.id), "FORBIDDEN");
+    await expectAppError(withdrawRequest(otherOrgAdmin, r.id), "NOT_FOUND");
+    await approveRequest(buyer, r.id);
+    await expectAppError(reopenRequest(outsider, r.id, "უცხო"), "FORBIDDEN");
+    await expectAppError(reopenRequest(otherOrgAdmin, r.id, "უცხო"), "NOT_FOUND");
+    expect(await statusOf(r.id)).toBe("APPROVED");
+  });
+});

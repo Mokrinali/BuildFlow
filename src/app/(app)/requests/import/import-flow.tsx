@@ -126,6 +126,7 @@ function TextStep({
           value={projectId}
           onChange={(e) => setProjectId(e.target.value)}
           aria-invalid={fe.projectId ? true : undefined}
+          aria-describedby={fe.projectId ? `${uid}-project-err` : undefined}
           className={inputClass}
         >
           {projects.map((p) => (
@@ -134,7 +135,11 @@ function TextStep({
             </option>
           ))}
         </select>
-        {fe.projectId && <p className="text-sm text-red-800">{fe.projectId}</p>}
+        {fe.projectId && (
+          <p id={`${uid}-project-err`} className="text-sm text-red-800">
+            {fe.projectId}
+          </p>
+        )}
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor={`${uid}-text`} className="text-sm font-medium">
@@ -280,7 +285,8 @@ function ImportReview({
     for (const [key, msg] of Object.entries(state.fieldErrors ?? {})) {
       const m = /^items\.(\d+)\.(\w+)$/.exec(key);
       const row = m ? sentToRow[Number(m[1])] : undefined;
-      if (row !== undefined) (out[row] ??= {})[m![2] as Field] = msg;
+      // Keyed by the row key (not its index), so splitting or adding rows keeps errors in place.
+      if (row !== undefined) (out[rows[row]!.key] ??= {})[m![2] as Field] = msg;
     }
     return out;
     // Errors refer to the payload of the last submit; recompute only when they change.
@@ -376,7 +382,7 @@ function ImportReview({
             value={desiredDate}
             onChange={(e) => setDesiredDate(e.target.value)}
             aria-invalid={fe.desiredDate ? true : undefined}
-            aria-describedby={`${uid}-date-hint`}
+            aria-describedby={`${uid}-date-hint${fe.desiredDate ? ` ${uid}-date-err` : ""}`}
             className={`${inputClass} ${dateIssues.length && !fe.desiredDate ? flaggedClass : ""}`}
           />
           <div id={`${uid}-date-hint`} className="text-xs text-steel-600">
@@ -394,7 +400,11 @@ function ImportReview({
               "ტექსტში თარიღი ვერ მოიძებნა."
             )}
           </div>
-          {fe.desiredDate && <p className="text-sm text-red-800">{fe.desiredDate}</p>}
+          {fe.desiredDate && (
+            <p id={`${uid}-date-err`} className="text-sm text-red-800">
+              {fe.desiredDate}
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={`${uid}-priority`} className="text-sm font-medium">
@@ -447,7 +457,7 @@ function ImportReview({
         )}
         <ol className="flex flex-col gap-4">
           {rows.map((r, i) => {
-            const err = rowErrors[i] ?? {};
+            const err = rowErrors[r.key] ?? {};
             const id = (f: string) => `${uid}-${r.key}-${f}`;
             const label = `პოზიცია ${i + 1}`;
             const field = (
@@ -512,7 +522,7 @@ function ImportReview({
                     <button
                       type="button"
                       onClick={() => update(i, { skip: !r.skip })}
-                      className="rounded px-2 py-1 text-sm underline underline-offset-4"
+                      className="min-h-10 rounded px-2 text-sm underline underline-offset-4"
                       aria-label={`${label}: ${r.skip ? "დაბრუნება" : "გამოტოვება"}`}
                     >
                       {r.skip ? "დაბრუნება" : "გამოტოვება"}
@@ -528,7 +538,7 @@ function ImportReview({
                             flags: ["quantity"],
                           })
                         }
-                        className="rounded px-2 py-1 text-sm underline underline-offset-4"
+                        className="min-h-10 rounded px-2 text-sm underline underline-offset-4"
                         aria-label={`${label}: გაყოფა ორ პოზიციად`}
                       >
                         გაყოფა
@@ -582,7 +592,15 @@ function ImportReview({
                 <button
                   type="button"
                   disabled={added.has(l.lineNo)}
-                  onClick={() => insertAfter(rows.length - 1, blankRow(l.lineNo, l.text))}
+                  onClick={() =>
+                    insertAfter(
+                      rows.length - 1,
+                      blankRow(
+                        l.lineNo,
+                        (l.kind === "skipped" && l.content) || l.text.slice(0, 200),
+                      ),
+                    )
+                  }
                   className="rounded px-1 text-sm underline underline-offset-4 disabled:no-underline disabled:opacity-60"
                 >
                   {added.has(l.lineNo) ? "დამატებულია" : "პოზიციად დამატება"}

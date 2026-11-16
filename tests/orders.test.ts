@@ -728,3 +728,65 @@ describe("dashboard and delivery filter", () => {
     expect((await requestDashboard(admin)).toOrder).toBe(1);
   });
 });
+
+describe("access and races (code review findings)", () => {
+  async function received() {
+    const r = await approvedRequest();
+    const o = await createOrder(
+      buyer,
+      orderInput(r.id, [{ requestItemId: r.cement, quantity: "25" }]),
+    );
+    const item = (await orderItemsOf(o.id))[0]!;
+    await createReceipt(receiver, {
+      orderId: o.id,
+      receivedOn: todayInTbilisi(),
+      items: [{ orderItemId: item.id, quantity: "20" }],
+    });
+    const entry = await db.receiptItem.findFirstOrThrow({ where: { orderItemId: item.id } });
+    return { r, orderId: o.id, entryId: entry.id, itemId: item.id };
+  }
+
+  it("refuses other projects and organizations on cancel and correction", async () => {
+    const { orderId, entryId } = await received();
+    await expectAppError(cancelOrder(outsider, orderId, "უცხო"), "FORBIDDEN");
+    await expectAppError(cancelOrder(otherOrgAdmin, orderId, "უცხო"), "NOT_FOUND");
+    const fix = { quantity: "10", reason: "უცხო შესწორება" };
+    await expectAppError(correctReceiptItem(outsider, entryId, fix), "FORBIDDEN");
+    await expectAppError(correctReceiptItem(otherOrgAdmin, entryId, fix), "NOT_FOUND");
+  });
+
+  it("keeps a receipt consistent under two parallel corrections", async () => {
+    const { itemId, entryId } = await received();
+    await Promise.allSettled([
+      correctReceiptItem(receiver, entryId, { quantity: "15", reason: "პირველი შესწორება" }),
+      correctReceiptItem(receiver, entryId, { quantity: "10", reason: "მეორე შესწორება" }),
+    ]);
+    const net = await db.receiptItem.aggregate({
+      where: { orderItemId: itemId },
+      _sum: { quantity: true },
+    });
+    // Each correction sets an absolute value, so the result is one of the two, never their sum.
+    expect(["15", "10"]).toContain(net._sum.quantity?.toString());
+  });
+
+  it("never leaves a cancelled request with an active order", async () => {
+    for (let i = 0; i < 5; i++) {
+      const r = await approvedRequest();
+      await Promise.allSettled([
+        cancelRequest(buyer, r.id, "აღარ გვჭირდება"),
+        createOrder(buyer, orderInput(r.id, [{ requestItemId: r.cement, quantity: "5" }])),
+      ]);
+      const status = (await db.purchaseRequest.findUniqueOrThrow({ where: { id: r.id } })).status;
+      const active = await db.purchaseOrder.count({ where: { requestId: r.id, status: "ACTIVE" } });
+      if (status === "CANCELLED") expect(active).toBe(0);
+    }
+  });
+
+  it("clamps an out-of-range page of the order list", async () => {
+    const r = await approvedRequest();
+    await createOrder(buyer, orderInput(r.id, [{ requestItemId: r.cement, quantity: "5" }]));
+    const far = await listOrders(admin, { page: "9" });
+    expect(far.page).toBe(1);
+    expect(far.rows).toHaveLength(1);
+  });
+});

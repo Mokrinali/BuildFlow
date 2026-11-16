@@ -87,9 +87,14 @@ export function ReceiveForm({
               value={receivedOn}
               onChange={(e) => setReceivedOn(e.target.value)}
               aria-invalid={fe.receivedOn ? true : undefined}
+              aria-describedby={fe.receivedOn ? `${uid}-date-err` : undefined}
               className={inputClass}
             />
-            {fe.receivedOn && <p className="text-sm text-red-800">{fe.receivedOn}</p>}
+            {fe.receivedOn && (
+              <p id={`${uid}-date-err`} className="text-sm text-red-800">
+                {fe.receivedOn}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor={`${uid}-note`} className="text-sm font-medium">
@@ -134,7 +139,7 @@ export function ReceiveForm({
                     <button
                       type="button"
                       onClick={() => setQuantities((q) => ({ ...q, [it.id]: it.remaining }))}
-                      className="shrink-0 rounded px-1 text-xs underline underline-offset-4"
+                      className="min-h-10 shrink-0 rounded px-2 text-sm underline underline-offset-4"
                       aria-label={`${it.name}: სრული დარჩენილი რაოდენობა`}
                     >
                       სრული
@@ -182,10 +187,13 @@ export function CancelOrderForm({ orderId }: { orderId: string }) {
           minLength={3}
           maxLength={1000}
           aria-invalid={state.fieldErrors?.reason ? true : undefined}
+          aria-describedby={state.fieldErrors?.reason ? `${id}-err` : undefined}
           className="rounded-md border border-steel bg-white px-3 py-2 text-base"
         />
         {state.fieldErrors?.reason && (
-          <p className="text-sm text-red-800">{state.fieldErrors.reason}</p>
+          <p id={`${id}-err`} className="text-sm text-red-800">
+            {state.fieldErrors.reason}
+          </p>
         )}
         <Button type="submit" variant="danger" disabled={pending}>
           შეკვეთის გაუქმება
@@ -232,9 +240,14 @@ export function CorrectReceiptForm({
           maxLength={16}
           defaultValue={current}
           aria-invalid={fe.quantity ? true : undefined}
+          aria-describedby={fe.quantity ? `${id}-q-err` : undefined}
           className={inputClass}
         />
-        {fe.quantity && <p className="text-sm text-red-800">{fe.quantity}</p>}
+        {fe.quantity && (
+          <p id={`${id}-q-err`} className="text-sm text-red-800">
+            {fe.quantity}
+          </p>
+        )}
         <label htmlFor={`${id}-r`} className="text-xs font-medium">
           შესწორების მიზეზი
         </label>
@@ -245,9 +258,14 @@ export function CorrectReceiptForm({
           minLength={3}
           maxLength={1000}
           aria-invalid={fe.reason ? true : undefined}
+          aria-describedby={fe.reason ? `${id}-r-err` : undefined}
           className={inputClass}
         />
-        {fe.reason && <p className="text-sm text-red-800">{fe.reason}</p>}
+        {fe.reason && (
+          <p id={`${id}-r-err`} className="text-sm text-red-800">
+            {fe.reason}
+          </p>
+        )}
         <Button type="submit" variant="secondary" disabled={pending}>
           შესწორების შენახვა
         </Button>

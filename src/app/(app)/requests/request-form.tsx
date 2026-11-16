@@ -76,7 +76,8 @@ export function RequestForm({
       if (!m) continue;
       const row = sentToRow[Number(m[1])];
       if (row === undefined) continue;
-      (out[row] ??= {})[m[2] as keyof ItemRow] = msg;
+      // Keyed by the row key (not its index), so deleting a row does not move errors around.
+      (out[rows[row]!.key] ??= {})[m[2] as keyof ItemRow] = msg;
     }
     return out;
     // Errors refer to the payload of the last submit; recompute only when they change.
@@ -117,6 +118,7 @@ export function RequestForm({
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
               aria-invalid={fe.projectId ? true : undefined}
+              aria-describedby={fe.projectId ? `${uid}-project-err` : undefined}
               className={inputClass}
             >
               {projects.map((p) => (
@@ -125,7 +127,11 @@ export function RequestForm({
                 </option>
               ))}
             </select>
-            {fe.projectId && <p className="text-sm text-red-800">{fe.projectId}</p>}
+            {fe.projectId && (
+              <p id={`${uid}-project-err`} className="text-sm text-red-800">
+                {fe.projectId}
+              </p>
+            )}
           </div>
         )}
         <div className="flex flex-col gap-1">
@@ -139,9 +145,14 @@ export function RequestForm({
             value={desiredDate}
             onChange={(e) => setDesiredDate(e.target.value)}
             aria-invalid={fe.desiredDate ? true : undefined}
+            aria-describedby={fe.desiredDate ? `${uid}-date-err` : undefined}
             className={inputClass}
           />
-          {fe.desiredDate && <p className="text-sm text-red-800">{fe.desiredDate}</p>}
+          {fe.desiredDate && (
+            <p id={`${uid}-date-err`} className="text-sm text-red-800">
+              {fe.desiredDate}
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={`${uid}-priority`} className="text-sm font-medium">
@@ -170,9 +181,15 @@ export function RequestForm({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             maxLength={2000}
+            aria-invalid={fe.note ? true : undefined}
+            aria-describedby={fe.note ? `${uid}-note-err` : undefined}
             className="rounded-md border border-steel bg-white px-3 py-2 text-base text-navy"
           />
-          {fe.note && <p className="text-sm text-red-800">{fe.note}</p>}
+          {fe.note && (
+            <p id={`${uid}-note-err`} className="text-sm text-red-800">
+              {fe.note}
+            </p>
+          )}
         </div>
       </section>
 
@@ -190,7 +207,7 @@ export function RequestForm({
 
         <ol className="flex flex-col gap-4">
           {rows.map((r, i) => {
-            const err = rowErrors[i] ?? {};
+            const err = rowErrors[r.key] ?? {};
             const id = (f: string) => `${uid}-${r.key}-${f}`;
             const field = (
               f: keyof ItemRow,

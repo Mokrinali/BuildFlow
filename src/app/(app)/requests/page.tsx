@@ -20,6 +20,7 @@ function queryString(f: ListFilters, page?: number) {
   const p = new URLSearchParams();
   if (f.project) p.set("project", f.project);
   if (f.status) p.set("status", f.status);
+  if (f.mine) p.set("mine", f.mine);
   if (f.q) p.set("q", f.q);
   if (f.from) p.set("from", f.from);
   if (f.to) p.set("to", f.to);
@@ -38,6 +39,7 @@ export default async function RequestsPage({ searchParams }: Props) {
     listRequests(user, {
       project: first("project"),
       status: first("status"),
+      mine: first("mine"),
       q: first("q"),
       from: first("from"),
       to: first("to"),
@@ -46,7 +48,7 @@ export default async function RequestsPage({ searchParams }: Props) {
     listProjects(user, { includeArchived: true }),
   ]);
   const filtered = Boolean(
-    filters.project || filters.status || filters.q || filters.from || filters.to,
+    filters.project || filters.status || filters.mine || filters.q || filters.from || filters.to,
   );
 
   return (
@@ -111,6 +113,7 @@ export default async function RequestsPage({ searchParams }: Props) {
             className={fieldClass}
           >
             <option value="">ყველა</option>
+            <option value="OPEN">ღია (მიმდინარე)</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {requestStatusLabel[s]}
@@ -136,7 +139,17 @@ export default async function RequestsPage({ searchParams }: Props) {
           </label>
           <input id="f-to" type="date" name="to" defaultValue={filters.to} className={fieldClass} />
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="mine"
+              value="1"
+              defaultChecked={filters.mine === "1"}
+              className="h-4 w-4 accent-navy"
+            />
+            მხოლოდ ჩემი
+          </label>
           <button type="submit" className={buttonClass("secondary")}>
             ფილტრი
           </button>

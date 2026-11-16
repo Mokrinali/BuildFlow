@@ -588,9 +588,11 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
   if (toStart) and.push({ createdAt: { lt: new Date(toStart.getTime() + 24 * 3600 * 1000) } });
 
   const where = { AND: and };
-  const page = f.page ?? 1;
-  const [total, rows] = await Promise.all([
-    db.purchaseOrder.count({ where }),
+  const total = await db.purchaseOrder.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // An out-of-range page shows the last page, not "no orders yet".
+  const page = Math.min(f.page ?? 1, pageCount);
+  const [rows] = await Promise.all([
     db.purchaseOrder.findMany({
       where,
       orderBy: { number: "desc" },
@@ -636,7 +638,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
     }),
     total,
     page,
-    pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    pageCount,
     filters: f,
   };
 }

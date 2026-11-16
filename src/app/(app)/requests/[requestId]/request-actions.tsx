@@ -93,10 +93,13 @@ function ReasonAction({
           minLength={3}
           maxLength={1000}
           aria-invalid={state.fieldErrors?.reason ? true : undefined}
+          aria-describedby={state.fieldErrors?.reason ? `${id}-err` : undefined}
           className="rounded-md border border-steel bg-white px-3 py-2 text-base"
         />
         {state.fieldErrors?.reason && (
-          <p className="text-sm text-red-800">{state.fieldErrors.reason}</p>
+          <p id={`${id}-err`} className="text-sm text-red-800">
+            {state.fieldErrors.reason}
+          </p>
         )}
         <Button type="submit" variant={variant} disabled={pending}>
           {label}

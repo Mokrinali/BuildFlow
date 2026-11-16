@@ -26,7 +26,14 @@ export type ParsedItem = {
 
 export type ParsedLine =
   | { lineNo: number; text: string; kind: "blank" }
-  | { lineNo: number; text: string; kind: "skipped"; reason: string }
+  | {
+      lineNo: number;
+      text: string;
+      kind: "skipped";
+      reason: string;
+      /** The line without WhatsApp header, bullet and emoji: used when it is added as an item. */
+      content?: string;
+    }
   | { lineNo: number; text: string; kind: "items"; items: ParsedItem[] };
 
 export type DateFlag = "uncertain" | "multiple" | "past";
@@ -75,7 +82,7 @@ const UNIT_TABLE: [string, string][] = [
   ["მ³", String.raw`კუბ(?:ურ\p{L}*)?\.?\s?მ(?:ეტრ\p{L}*)?|კუბ\p{L}*|მ3|მ³|m3|m³`],
   ["ტომარა", String.raw`ტომარ\p{L}*|ტომრ\p{L}*|ტომ`],
   ["ტონა", String.raw`ტონ\p{L}*|ტ`],
-  ["კგ", String.raw`კგ|კილოგრამ\p{L}*|კილო\p{L}*|kg`],
+  ["კგ", String.raw`კგ|კილოგრამ\p{L}*|კილო(?!მეტრ)\p{L}*|kg`],
   ["ლიტრი", String.raw`ლიტრ\p{L}*|ლიტ|ლ`],
   ["ცალი", String.raw`ცალ\p{L}*|ცლ|ც|შტ|шт|pcs`],
   ["მ", String.raw`მეტრ\p{L}*|გრძ\.?\s?მ|მ|m`],
@@ -158,12 +165,17 @@ const iso = (y: number, m: number, d: number) => {
 const addDays = (isoDay: string, n: number) =>
   new Date(Date.parse(`${isoDay}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-/** A day/month without a year: this year, or next year if it has already passed. */
+/**
+ * A day/month without a year: this year, or next year if it passed long ago ("5 იანვარს" in
+ * November). A date that passed in the last month stays this year, so it is flagged as past
+ * instead of silently jumping a year ahead ("14 ნოემბრამდე" written on the 16th).
+ */
 function inferYear(today: string, m: number, d: number): string | null {
   const y = Number(today.slice(0, 4));
   const v = iso(y, m, d);
   if (!v) return null;
-  return v < today ? iso(y + 1, m, d) : v;
+  if (v >= today || v >= addDays(today, -31)) return v;
+  return iso(y + 1, m, d);
 }
 
 /**
@@ -192,7 +204,17 @@ function findDates(text: string, today: string, base: string = today): DateHit[]
   );
   while ((m = full.exec(text))) {
     const y = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    add(m, iso(y, Number(m[2]), Number(m[1])));
+    const value = iso(y, Number(m[2]), Number(m[1]));
+    // With a two-digit year, "10/12/14" is more likely sizes than 10 Dec 2014: accept only dates
+    // within a year back or two years ahead.
+    if (
+      value &&
+      m[3]!.length === 2 &&
+      (value < addDays(today, -366) || value > addDays(today, 731))
+    ) {
+      continue;
+    }
+    add(m, value);
   }
   // Day and month name: "20 ნოემბრამდე", "5 დეკემბერს".
   const named = new RegExp(
@@ -243,6 +265,8 @@ function findDates(text: string, today: string, base: string = today): DateHit[]
 
 const NUM = String.raw`\d+(?:[.,]\d+)?`;
 const SPEC_PATTERNS: RegExp[] = [
+  // Slash-separated sizes: 10/12/14 (not a date, not a fraction)
+  /(?<![\p{L}\d])\d+(?:\/\d+){2,}(?![\d])/gu,
   // Hyphenated dimensions: 500-250-200 (a block size, not a range or a phone number)
   /(?<![\p{L}\d])\d+(?:\s*-\s*\d+){2,}(?![\d])/gu,
   // Dimensions: 2x50, 10×20×300 მმ
@@ -467,6 +491,9 @@ function parseSegment(segment: string): ParsedItem | null {
       if (m) {
         unit = u;
         nameText = nameText.slice(0, m.index) + " " + nameText.slice(m.index + m[0].length);
+        // "გამანაწილებელი ყუთი 10": the word may belong to the name, not be the unit.
+        flags.add("unit");
+        issues.push(`ერთეული („${m[0]}“) აღებულია ხაზის სხვა ადგილიდან. შეამოწმეთ.`);
         break;
       }
     }
@@ -589,7 +616,13 @@ export function parseMaterialText(input: string, today: string): ParseResult {
     const cleaned = blank(blank(body, dateHits), noise);
 
     if (GREETING.test(cleaned.trim()) && !/\d/.test(cleaned)) {
-      lines.push({ lineNo, text, kind: "skipped", reason: "მისალმება ან პასუხი" });
+      lines.push({
+        lineNo,
+        text,
+        kind: "skipped",
+        reason: "მისალმება ან პასუხი",
+        content: body.slice(0, 200),
+      });
       return;
     }
     const items = cleaned
@@ -609,7 +642,7 @@ export function parseMaterialText(input: string, today: string): ParseResult {
         : /[:：]\s*$/.test(body)
           ? "სათაური"
           : "რაოდენობა არ არის. თუ ეს მასალაა, დაამატეთ პოზიციად.";
-    lines.push({ lineNo, text, kind: "skipped", reason });
+    lines.push({ lineNo, text, kind: "skipped", reason, content: body.slice(0, 200) });
   });
 
   return { lines, desiredDate: pickDate(dates, today) };

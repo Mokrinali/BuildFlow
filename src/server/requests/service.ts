@@ -616,10 +616,24 @@ const statusValues = [
   "CANCELLED",
 ] as const;
 
+const OPEN_STATUSES: RequestStatus[] = [
+  "IN_REVIEW",
+  "APPROVED",
+  "PARTIALLY_ORDERED",
+  "ORDERED",
+  "PARTIALLY_RECEIVED",
+];
+
 /** URL filters for the request list (unknown or invalid values are ignored). */
 export const listFiltersSchema = z.object({
   project: z.string().max(64).optional().catch(undefined),
-  status: z.enum(statusValues).optional().catch(undefined),
+  // "OPEN" = every status still in progress (what the dashboard counts as open requests).
+  status: z
+    .enum([...statusValues, "OPEN"])
+    .optional()
+    .catch(undefined),
+  // "1" = only requests the actor wrote.
+  mine: z.literal("1").optional().catch(undefined),
   q: z.string().trim().max(100).optional().catch(undefined),
   from: z.string().optional().catch(undefined),
   to: z.string().optional().catch(undefined),
@@ -640,7 +654,9 @@ export async function listRequests(actor: Actor, rawFilters: unknown) {
   const f = listFiltersSchema.parse(rawFilters ?? {});
   const and: Prisma.PurchaseRequestWhereInput[] = [visibleRequestsWhere(actor)];
   if (f.project) and.push({ projectId: f.project });
-  if (f.status) and.push({ status: f.status });
+  if (f.status === "OPEN") and.push({ status: { in: OPEN_STATUSES } });
+  else if (f.status) and.push({ status: f.status });
+  if (f.mine) and.push({ authorId: actor.userId });
   if (f.q) {
     const digits = f.q.replace(/^№/, "").replace(/^0+(?=\d)/, "");
     const num = /^\d{1,9}$/.test(digits) ? Number(digits) : null;
@@ -657,9 +673,11 @@ export async function listRequests(actor: Actor, rawFilters: unknown) {
   if (toStart) and.push({ createdAt: { lt: new Date(toStart.getTime() + 24 * 3600 * 1000) } });
 
   const where = { AND: and };
-  const page = f.page ?? 1;
-  const [total, rows] = await Promise.all([
-    db.purchaseRequest.count({ where }),
+  const total = await db.purchaseRequest.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // An out-of-range page (an old link, a typed URL) shows the last page, not "no requests yet".
+  const page = Math.min(f.page ?? 1, pageCount);
+  const [rows] = await Promise.all([
     db.purchaseRequest.findMany({
       where,
       orderBy: { number: "desc" },
@@ -678,16 +696,8 @@ export async function listRequests(actor: Actor, rawFilters: unknown) {
       },
     }),
   ]);
-  return { rows, total, page, pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)), filters: f };
+  return { rows, total, page, pageCount, filters: f };
 }
-
-const OPEN_STATUSES: RequestStatus[] = [
-  "IN_REVIEW",
-  "APPROVED",
-  "PARTIALLY_ORDERED",
-  "ORDERED",
-  "PARTIALLY_RECEIVED",
-];
 
 /** Numbers for the dashboard: open requests, awaiting my review, my drafts. */
 export async function requestDashboard(actor: Actor) {

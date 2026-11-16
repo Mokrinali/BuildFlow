@@ -113,6 +113,7 @@ export function OrderForm({
             value={supplier}
             onChange={(e) => setSupplier(e.target.value)}
             aria-invalid={fe.supplier ? true : undefined}
+            aria-describedby={fe.supplier ? `${uid}-supplier-err` : undefined}
             className={inputClass}
           >
             {suppliers.map((s) => (
@@ -123,7 +124,9 @@ export function OrderForm({
             <option value={NEW_SUPPLIER}>+ ახალი მომწოდებელი</option>
           </select>
           {fe.supplier && supplier !== NEW_SUPPLIER && (
-            <p className="text-sm text-red-800">{fe.supplier}</p>
+            <p id={`${uid}-supplier-err`} className="text-sm text-red-800">
+              {fe.supplier}
+            </p>
           )}
         </div>
         {supplier === NEW_SUPPLIER && (
@@ -138,10 +141,15 @@ export function OrderForm({
               maxLength={200}
               required
               aria-invalid={fe.supplier || fe.supplierName ? true : undefined}
+              aria-describedby={
+                fe.supplier || fe.supplierName ? `${uid}-supplier-name-err` : undefined
+              }
               className={inputClass}
             />
             {(fe.supplier || fe.supplierName) && (
-              <p className="text-sm text-red-800">{fe.supplier ?? fe.supplierName}</p>
+              <p id={`${uid}-supplier-name-err`} className="text-sm text-red-800">
+                {fe.supplier ?? fe.supplierName}
+              </p>
             )}
           </div>
         )}
@@ -173,10 +181,13 @@ export function OrderForm({
             value={plannedDeliveryDate}
             onChange={(e) => setPlannedDeliveryDate(e.target.value)}
             aria-invalid={fe.plannedDeliveryDate ? true : undefined}
+            aria-describedby={fe.plannedDeliveryDate ? `${uid}-date-err` : undefined}
             className={inputClass}
           />
           {fe.plannedDeliveryDate && (
-            <p className="text-sm text-red-800">{fe.plannedDeliveryDate}</p>
+            <p id={`${uid}-date-err`} className="text-sm text-red-800">
+              {fe.plannedDeliveryDate}
+            </p>
           )}
         </div>
       </section>

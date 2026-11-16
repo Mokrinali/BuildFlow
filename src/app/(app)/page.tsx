@@ -78,12 +78,16 @@ export default async function DashboardPage({ searchParams }: Props) {
               value={dash.awaitingReview}
               label="განსახილველი"
             />
-            <Stat href="/requests" value={dash.open} label="ღია მოთხოვნა" />
+            <Stat href="/requests?status=OPEN" value={dash.open} label="ღია მოთხოვნა" />
             {dash.toOrder > 0 && (
               <Stat href="/requests?status=APPROVED" value={dash.toOrder} label="შესაკვეთი" />
             )}
             {dash.myDrafts > 0 && (
-              <Stat href="/requests?status=DRAFT" value={dash.myDrafts} label="ჩემი მონახაზი" />
+              <Stat
+                href="/requests?status=DRAFT&mine=1"
+                value={dash.myDrafts}
+                label="ჩემი მონახაზი"
+              />
             )}
           </div>
           {dash.recent.length > 0 && (
