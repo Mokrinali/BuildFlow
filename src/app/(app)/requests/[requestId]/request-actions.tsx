@@ -19,12 +19,15 @@ type FormAction = (state: ActionState, form: FormData) => Promise<ActionState>;
 
 function SimpleAction({
   requestId,
+  submittedAt,
   action,
   label,
   variant = "primary",
   confirmText,
 }: {
   requestId: string;
+  /** The submission shown on this page; reviews are refused if it changed since. */
+  submittedAt?: string;
   action: FormAction;
   label: string;
   variant?: "primary" | "secondary";
@@ -40,6 +43,7 @@ function SimpleAction({
       className="flex flex-col gap-2"
     >
       <input type="hidden" name="requestId" value={requestId} />
+      {submittedAt !== undefined && <input type="hidden" name="submittedAt" value={submittedAt} />}
       <Button type="submit" variant={variant} disabled={pending} className="w-full">
         {label}
       </Button>
@@ -50,12 +54,14 @@ function SimpleAction({
 
 function ReasonAction({
   requestId,
+  submittedAt,
   action,
   label,
   reasonLabel,
   variant = "secondary",
 }: {
   requestId: string;
+  submittedAt?: string;
   action: FormAction;
   label: string;
   reasonLabel: string;
@@ -68,6 +74,9 @@ function ReasonAction({
       <summary className="cursor-pointer text-sm font-semibold">{label}</summary>
       <form action={formAction} className="mt-3 flex flex-col gap-2">
         <input type="hidden" name="requestId" value={requestId} />
+        {submittedAt !== undefined && (
+          <input type="hidden" name="submittedAt" value={submittedAt} />
+        )}
         <label htmlFor={id} className="text-sm font-medium">
           {reasonLabel}
         </label>
@@ -95,9 +104,11 @@ function ReasonAction({
 
 export function RequestActions({
   requestId,
+  submittedAt,
   permissions: p,
 }: {
   requestId: string;
+  submittedAt: string;
   permissions: RequestPermissions;
 }) {
   const any = Object.values(p).some(Boolean);
@@ -117,6 +128,7 @@ export function RequestActions({
         {p.canApprove && (
           <SimpleAction
             requestId={requestId}
+            submittedAt={submittedAt}
             action={approveAction}
             label="დამტკიცება"
             confirmText="დავამტკიცოთ მოთხოვნა?"
@@ -125,6 +137,7 @@ export function RequestActions({
         {p.canReject && (
           <ReasonAction
             requestId={requestId}
+            submittedAt={submittedAt}
             action={rejectAction}
             label="უარყოფა"
             reasonLabel="უარყოფის მიზეზი"

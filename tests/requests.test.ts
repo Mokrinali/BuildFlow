@@ -352,3 +352,74 @@ describe("list filters and dashboard", () => {
     expect((await requestDashboard(outsider)).open).toBe(0);
   });
 });
+
+describe("review safety (code review findings)", () => {
+  it("refuses a review made on a stale page after withdraw, edit and resubmit", async () => {
+    const r = await createRequest(requester, newRequest());
+    await submitRequest(requester, r.id);
+    const seen = (await getRequest(buyer, r.id)).request.submittedAt;
+    expect(seen).toBeInstanceOf(Date);
+
+    await withdrawRequest(requester, r.id);
+    await updateRequest(requester, r.id, {
+      items: [{ name: "ცემენტი M400", quantity: "1000", unit: "ტომარა" }],
+    });
+    await submitRequest(requester, r.id);
+
+    await expectAppError(approveRequest(buyer, r.id, { expectedSubmittedAt: seen }), "CONFLICT");
+    await expectAppError(
+      rejectRequest(buyer, r.id, "ძველი გვერდიდან", { expectedSubmittedAt: seen }),
+      "CONFLICT",
+    );
+    expect(await statusOf(r.id)).toBe("IN_REVIEW");
+    const current = (await getRequest(buyer, r.id)).request.submittedAt;
+    await approveRequest(buyer, r.id, { expectedSubmittedAt: current });
+    expect(await statusOf(r.id)).toBe("APPROVED");
+  });
+
+  it("never approves a request without items", async () => {
+    const r = await createRequest(requester, newRequest());
+    await submitRequest(requester, r.id);
+    await db.requestItem.deleteMany({ where: { requestId: r.id } });
+    await expectAppError(approveRequest(buyer, r.id), "VALIDATION");
+  });
+
+  it("never puts an empty request into review when an edit races the submit", async () => {
+    for (let i = 0; i < 8; i++) {
+      const r = await createRequest(requester, newRequest());
+      await Promise.allSettled([
+        submitRequest(requester, r.id),
+        updateRequest(requester, r.id, { items: [] }),
+      ]);
+      const req = await db.purchaseRequest.findUniqueOrThrow({
+        where: { id: r.id },
+        include: { _count: { select: { items: true } } },
+      });
+      if (req.status === "IN_REVIEW") expect(req._count.items).toBeGreaterThan(0);
+    }
+  });
+
+  it("records the full before/after of an edit", async () => {
+    const r = await createRequest(requester, newRequest());
+    await updateRequest(requester, r.id, {
+      note: "შეცვლილი",
+      items: [{ name: "არმატურა", spec: "Ø16", quantity: "120", unit: "ცალი" }],
+    });
+    const ev = await db.auditEvent.findFirstOrThrow({
+      where: { entityId: r.id, action: "request.updated" },
+    });
+    expect(ev.changes).toMatchObject({
+      before: {
+        note: "სასწრაფოდ",
+        items: [
+          { name: "ცემენტი M400", quantity: "25", unit: "ტომარა" },
+          { name: "არმატურა", spec: "Ø12", quantity: "1.5", unit: "ტონა" },
+        ],
+      },
+      after: {
+        note: "შეცვლილი",
+        items: [{ name: "არმატურა", spec: "Ø16", quantity: "120", unit: "ცალი" }],
+      },
+    });
+  });
+});

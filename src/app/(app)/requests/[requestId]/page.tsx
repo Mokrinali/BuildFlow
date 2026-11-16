@@ -272,7 +272,11 @@ export default async function RequestPage({ params, searchParams }: Props) {
         </div>
 
         <div className="flex flex-col gap-6">
-          <RequestActions requestId={request.id} permissions={permissions} />
+          <RequestActions
+            requestId={request.id}
+            submittedAt={request.submittedAt?.toISOString() ?? ""}
+            permissions={permissions}
+          />
           <Card>
             <h2 className="mb-4 text-lg font-semibold">ქრონოლოგია</h2>
             <ol className="flex flex-col gap-3 text-sm">

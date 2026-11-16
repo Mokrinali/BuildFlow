@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { errors } from "@/lib/i18n/ka";
 import { formId, formPayload, runAction, type ActionState } from "@/server/action";
+import { AppError } from "@/server/errors";
 import {
   approveRequest,
   cancelRequest,
@@ -65,6 +67,16 @@ async function runTransition(form: FormData, fn: Transition, message: string) {
 
 const reasonOf = (form: FormData) => String(form.get("reason") ?? "");
 
+/** The submission the reviewer saw. Required for approve/reject; a stale page is refused. */
+function reviewedSubmission(form: FormData): { expectedSubmittedAt: Date | null } {
+  const raw = form.get("submittedAt");
+  if (typeof raw !== "string") throw new AppError("VALIDATION", errors.invalidInput);
+  if (raw === "") return { expectedSubmittedAt: null };
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) throw new AppError("VALIDATION", errors.invalidInput);
+  return { expectedSubmittedAt: d };
+}
+
 export async function submitAction(_: ActionState, form: FormData): Promise<ActionState> {
   return runTransition(form, submitRequest, "მოთხოვნა გაიგზავნა განსახილველად.");
 }
@@ -72,7 +84,11 @@ export async function withdrawAction(_: ActionState, form: FormData): Promise<Ac
   return runTransition(form, withdrawRequest, "მოთხოვნა დაბრუნდა მონახაზში.");
 }
 export async function approveAction(_: ActionState, form: FormData): Promise<ActionState> {
-  return runTransition(form, approveRequest, "მოთხოვნა დამტკიცდა.");
+  return runTransition(
+    form,
+    (u, rid) => approveRequest(u, rid, reviewedSubmission(form)),
+    "მოთხოვნა დამტკიცდა.",
+  );
 }
 export async function returnToDraftAction(_: ActionState, form: FormData): Promise<ActionState> {
   return runTransition(form, returnToDraft, "მოთხოვნა დაბრუნდა მონახაზში.");
@@ -80,7 +96,7 @@ export async function returnToDraftAction(_: ActionState, form: FormData): Promi
 export async function rejectAction(_: ActionState, form: FormData): Promise<ActionState> {
   return runTransition(
     form,
-    (u, rid) => rejectRequest(u, rid, reasonOf(form)),
+    (u, rid) => rejectRequest(u, rid, reasonOf(form), reviewedSubmission(form)),
     "მოთხოვნა უარყოფილია.",
   );
 }

@@ -218,6 +218,74 @@ describe("unclear lines are flagged, not guessed", () => {
   });
 });
 
+describe("code review findings: no confident wrong quantities", () => {
+  it("reads space-grouped thousands and flags the reading", () => {
+    expect(one("აგური 2 500 ც")).toMatchObject({
+      quantity: "2500",
+      unit: "ცალი",
+      flags: ["quantity"],
+    });
+    expect(one("ბლოკი 12 500 ცალი").quantity).toBe("12500");
+  });
+
+  it("asks when a separator could be decimal or thousands", () => {
+    expect(one("ბლოკი 1,000 ცალი")).toMatchObject({ quantity: null, flags: ["quantity"] });
+    expect(one("აგური 2.500 ცალი")).toMatchObject({ quantity: null, flags: ["quantity"] });
+    expect(one("არმატურა 1.250 ტონა")).toMatchObject({ quantity: "1.25", flags: ["quantity"] });
+    // A leading zero is clearly a decimal.
+    expect(one("მავთული 0,250 ტონა")).toMatchObject({ quantity: "0.25", flags: [] });
+  });
+
+  it("splits two materials on one line instead of merging them", () => {
+    for (const line of [
+      "25 ტომარა ცემენტი და 3 კუბი ქვიშა",
+      "ცემენტი 25 ტომარა ქვიშა 3 კუბი",
+      "ცემენტი 25 ტომარა. ქვიშა 3 კუბი.",
+    ]) {
+      expect(
+        itemsOf(line).map((i) => [i.name, i.quantity, i.unit]),
+        line,
+      ).toEqual([
+        ["ცემენტი", "25", "ტომარა"],
+        ["ქვიშა", "3", "მ³"],
+      ]);
+    }
+    expect(itemsOf("ქვიშა 3 კუბი, ხრეში 2 კუბი და ცემენტი 20 ტომარა").map((i) => i.name)).toEqual([
+      "ქვიშა",
+      "ხრეში",
+      "ცემენტი",
+    ]);
+    // A size after a count is not a second material.
+    expect(itemsOf("ფიცარი 20 ცალი 6მ")).toHaveLength(1);
+  });
+
+  it("does not swallow material lines as phone numbers", () => {
+    expect(one("ბლოკი 500-250-200 100 ცალი")).toMatchObject({
+      name: "ბლოკი",
+      spec: "500-250-200",
+      quantity: "100",
+      unit: "ცალი",
+    });
+    expect(one("არმატურა 500 12 50 ღერი")).toMatchObject({ quantity: "50", unit: "ღერი" });
+    expect(parse("599 12 34 56").lines[0]).toMatchObject({ kind: "skipped" });
+    expect(parse("დამირეკეთ 555 123 456").lines[0]).toMatchObject({ kind: "skipped" });
+    expect(parse("+995 32 2 12 34 56").lines[0]).toMatchObject({ kind: "skipped" });
+  });
+
+  it("flags fractions, alternatives and sums", () => {
+    expect(one("1/2 ტონა არმატურა")).toMatchObject({
+      name: "არმატურა",
+      quantity: "0.5",
+      unit: "ტონა",
+      flags: ["quantity"],
+    });
+    expect(one("ონკანი 1/2 4 ცალი")).toMatchObject({ spec: "1/2", quantity: "4", flags: [] });
+    expect(one("ცემენტი 2 ან 3 ტომარა")).toMatchObject({ name: "ცემენტი", quantity: null });
+    expect(one("25+5 ტომარა ცემენტი")).toMatchObject({ quantity: null, flags: ["quantity"] });
+    expect(one("ცემენტი 25.5.5 ტომარა")).toMatchObject({ quantity: null, flags: ["quantity"] });
+  });
+});
+
 describe("delivery date", () => {
   it.each([
     ["ხვალ მოიტანეთ", "2026-11-17", []],

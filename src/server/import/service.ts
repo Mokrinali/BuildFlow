@@ -126,6 +126,10 @@ export async function confirmImport(actor: Actor, raw: unknown) {
       select: { id: true },
     });
     if (previous) {
+      // A parallel submit of this same preview may have committed since the first key lookup:
+      // that is a replay, not a repeated text.
+      const winner = await findByKey(actor, input.idempotencyKey);
+      if (winner) return winner;
       throw new AppError("CONFLICT", errors.importRepeat, { allowRepeat: errors.importRepeat });
     }
   }

@@ -226,6 +226,8 @@ function findDates(text: string, today: string): DateHit[] {
 
 const NUM = String.raw`\d+(?:[.,]\d+)?`;
 const SPEC_PATTERNS: RegExp[] = [
+  // Hyphenated dimensions: 500-250-200 (a block size, not a range or a phone number)
+  /(?<![\p{L}\d])\d+(?:\s*-\s*\d+){2,}(?![\d])/gu,
   // Dimensions: 2x50, 10×20×300 მმ
   new RegExp(
     String.raw`(?<![\p{L}\d])${NUM}(?:\s*[xX×хХ*]\s*${NUM})+(?:\s*(?:მმ|სმ|მ|mm|cm|m)(?!\p{L}))?`,
@@ -246,14 +248,23 @@ const SPEC_PATTERNS: RegExp[] = [
   // Adjectival size: 12-იანი, 50კგ-იანი
   new RegExp(String.raw`(?<![\p{L}\d])${NUM}\s*\p{L}{0,6}-?იან\p{L}*`, "gu"),
 ];
+// Phone numbers only in an unmistakable shape, so "არმატურა 500 12 50 ღერი" stays an item:
+// a +995 prefix, a mobile number grouped 5XX XX XX XX, or 7+ digits in a row. Looser shapes
+// (5XX XXX XXX, landlines) count only when the line talks about calling.
 const NOISE_PATTERNS: RegExp[] = [
-  // Phone numbers: +995 599 12 34 56, 599123456, 032 2 12 34 56
-  /(?:\+?995[\s-]?)?(?<!\d)(?:5\d{2}|0\d{2,3})(?:[\s-]?\d{2,3}){2,3}(?!\d)/gu,
+  // +995 599 12 34 56, +995 32 2 12 34 56 (landline)
+  /\+?995[\s-]?\d{2,3}(?:[\s-]?\d{1,3}){2,4}(?!\d)/gu,
+  /(?<![\d.,-])5\d{2}(?:[\s-]?\d{2}){3}(?![\d-])/gu,
   /(?<!\d)\d{7,}(?!\d)/gu,
   // Times: 09:30, 10 საათზე
   /(?<!\d)\d{1,2}:\d{2}(?!\d)/gu,
   /(?<!\d)\d{1,2}\s*საათ\p{L}*/gu,
 ];
+// "დარეკეთ", "დამირეკეთ", "ტელ.", "ნომერი", "მობილური"
+const PHONE_CONTEXT = /(?:რეკ|ტელ|ნომერ|მობ|კონტაქტ)/u;
+const LOOSE_PHONE = /(?<!\d)(?:5\d{2}|0\d{2,3})(?:[\s-]?\d{2,3}){2,3}(?!\d)/gu;
+const noisePatterns = (line: string) =>
+  PHONE_CONTEXT.test(line) ? [LOOSE_PHONE, ...NOISE_PATTERNS] : NOISE_PATTERNS;
 
 const NUMBER_WORDS: Record<string, string> = {
   ერთი: "1",
@@ -293,7 +304,10 @@ type Candidate = Span & {
   quantity: string | null;
   raw: string;
   unit: string | null;
+  /** Several values ("20-25", "2 ან 3", "25+5"): no quantity, the user must choose. */
   range: boolean;
+  /** A reading that is plausible but not certain ("2 500" → 2500, "1/2" → 0.5). */
+  issue?: string;
 };
 
 /** Replace spans with spaces so positions of the remaining text stay valid. */
@@ -315,21 +329,48 @@ function collect(text: string, patterns: RegExp[]): Span[] {
 
 function findCandidates(text: string): Candidate[] {
   const out: Candidate[] = [];
+  // 1: space-grouped thousands "2 500"; 2/3: fraction "1/2"; 4: a number (several separators
+  // like "25.5.5" are kept whole so they fail validation); 5: a second value after -, +, ან.
   const re = new RegExp(
-    String.raw`(?<![\p{L}\d.,])(\d+(?:[.,]\d+)?)(?:\s*[-–]\s*(\d+(?:[.,]\d+)?))?(?![\d])`,
+    String.raw`(?<![\p{L}\d.,/])(?:(\d{1,3}(?: \d{3})+)(?![\d.,])|(\d+)/(\d+)|(\d+(?:[.,]\d+)*)(?:(?:\s*[-–+]\s*|\s+ან\s+)(\d+(?:[.,]\d+)?))?)(?![\d])`,
     "gu",
   );
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const end = m.index + m[0].length;
     const u = unitAt(text.slice(end));
+    const raw = text.slice(m.index, end + (u?.length ?? 0)).trim();
+    let quantity: string | null = null;
+    let issue: string | undefined;
+    if (m[1]) {
+      quantity = normalizeQuantity(m[1].replace(/ /g, ""));
+      issue = `„${m[1]}“ წაკითხულია როგორც ${quantity}. შეამოწმეთ.`;
+    } else if (m[2]) {
+      const value = Number(m[2]) / Number(m[3]);
+      quantity = Number.isFinite(value) ? normalizeQuantity(String(value)) : null;
+      issue = quantity
+        ? `წილადი „${m[2]}/${m[3]}“ წაკითხულია როგორც ${quantity}. შეამოწმეთ.`
+        : `წილადი „${m[2]}/${m[3]}“: მიუთითეთ ზუსტი რაოდენობა.`;
+    } else if (!m[5]) {
+      quantity = normalizeQuantity(m[4]!);
+      // "1,000" / "2.500": a decimal or a thousands separator? For pieces it is surely thousands.
+      if (quantity && /^[1-9]\d{0,2}[.,]\d{3}$/.test(m[4]!)) {
+        if (u && COUNT_UNITS.has(u.unit)) {
+          quantity = null;
+          issue = `„${m[4]}“: ${m[4]!.slice(0, -4)} თუ ${m[4]!.replace(/[.,]/, "")}? მიუთითეთ ზუსტი რაოდენობა.`;
+        } else {
+          issue = `„${m[4]}“ წაკითხულია როგორც ${quantity}. თუ ათასებია, შეასწორეთ.`;
+        }
+      }
+    }
     out.push({
       start: m.index,
       end: end + (u?.length ?? 0),
-      raw: text.slice(m.index, end + (u?.length ?? 0)).trim(),
-      quantity: m[2] ? null : normalizeQuantity(m[1]!),
+      raw,
+      quantity,
       unit: u?.unit ?? null,
-      range: Boolean(m[2]),
+      range: Boolean(m[5]),
+      issue,
     });
   }
   NUMBER_WORD_RE.lastIndex = 0;
@@ -351,11 +392,13 @@ function findCandidates(text: string): Candidate[] {
 }
 
 const hasLetters = (s: string) => /\p{L}/u.test(s);
+const trimPunctuation = (s: string) => s.replace(/^[\s\-–—:,;.()]+|[\s\-–—:,;.(]+$/gu, "");
 const cleanName = (s: string) =>
-  s
-    .replace(/\s+/g, " ")
-    .replace(/\s+([,.;:])/g, "$1")
-    .replace(/^[\s\-–—:,;.()]+|[\s\-–—:,;(]+$/gu, "")
+  trimPunctuation(
+    trimPunctuation(s.replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1"))
+      // Connectors left at the edge after splitting "ცემენტი და ქვიშა" into items.
+      .replace(/^(?:და|ან)(?=\s)|(?<=\s)(?:და|ან)$/u, ""),
+  )
     .replace(/\(\s*\)/g, "")
     .trim();
 
@@ -412,13 +455,19 @@ function parseSegment(segment: string): ParsedItem | null {
     }
   }
   let quantity = chosen.quantity;
+  if (chosen.issue) {
+    flags.add("quantity");
+    issues.push(chosen.issue);
+  }
   if (chosen.range) {
     flags.add("quantity");
-    issues.push(`მითითებულია დიაპაზონი („${chosen.raw}“). მიუთითეთ ზუსტი რაოდენობა.`);
+    issues.push(`მითითებულია რამდენიმე მნიშვნელობა („${chosen.raw}“). მიუთითეთ ზუსტი რაოდენობა.`);
   } else if (!quantity || !/[1-9]/.test(quantity)) {
     quantity = null;
     flags.add("quantity");
-    issues.push("რაოდენობა ვერ ამოიცნო. მიუთითეთ დადებითი რიცხვი (მაქსიმუმ 3 ათწილადი).");
+    if (!chosen.issue) {
+      issues.push("რაოდენობა ვერ ამოიცნო. მიუთითეთ დადებითი რიცხვი (მაქსიმუმ 3 ათწილადი).");
+    }
   }
   if (!unit) {
     flags.add("unit");
@@ -446,8 +495,34 @@ function parseSegment(segment: string): ParsedItem | null {
 function splitOnCommas(segment: string): (ParsedItem | null)[] {
   const parts = segment.split(/,\s*(?=\p{L})/u);
   if (parts.length > 1) {
+    const items = parts.flatMap(splitMaterials);
+    if (items.every(isComplete)) return items;
+  }
+  return splitMaterials(segment);
+}
+
+const isComplete = (i: ParsedItem | null): i is ParsedItem => Boolean(i && i.name && i.quantity);
+
+/**
+ * Two materials without a comma: "ცემენტი 25 ტომარა ქვიშა 3 კუბი" or
+ * "25 ტომარა ცემენტი და 3 კუბი ქვიშა". Cut between the measured quantities (after each one when
+ * the name comes first, before each one when the quantity comes first) and keep the cut only if
+ * every part is a complete item; "ფიცარი 20 ცალი 6მ" fails that test and stays one item.
+ */
+function splitMaterials(segment: string): (ParsedItem | null)[] {
+  const rest = blank(segment, collect(segment, SPEC_PATTERNS));
+  const measured = findCandidates(rest).filter((c) => c.unit);
+  if (measured.length >= 2) {
+    const quantityFirst = !hasLetters(rest.slice(0, measured[0]!.start));
+    const cuts = quantityFirst
+      ? measured.slice(1).map((c) => c.start)
+      : measured.slice(0, -1).map((c) => c.end);
+    const parts = [0, ...cuts].map((from, i) => segment.slice(from, cuts[i] ?? segment.length));
     const items = parts.map(parseSegment);
-    if (items.every((i) => i && i.name && i.quantity)) return items;
+    if (items.every(isComplete)) {
+      for (const it of items) it.issues.push("ხაზიდან ამოცნობილია რამდენიმე პოზიცია. შეამოწმეთ.");
+      return items;
+    }
   }
   return [parseSegment(segment)];
 }
@@ -490,7 +565,7 @@ export function parseMaterialText(input: string, today: string): ParseResult {
 
     const dateHits = findDates(body, today);
     for (const d of dateHits) dates.push({ value: d.value, lineNo, uncertain: d.uncertain });
-    const noise = collect(body, NOISE_PATTERNS);
+    const noise = collect(body, noisePatterns(body));
     const cleaned = blank(blank(body, dateHits), noise);
 
     if (GREETING.test(cleaned.trim()) && !/\d/.test(cleaned)) {

@@ -11,7 +11,7 @@ import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
-import { ORDERABLE } from "@/server/orders/progress";
+import { ORDERABLE, lockRequest } from "@/server/orders/progress";
 import { AppError, notFound } from "@/server/errors";
 import { parseInput } from "@/server/validation";
 
@@ -93,6 +93,30 @@ const itemRows = (items: ItemData[]) =>
     note: it.note,
   }));
 
+const itemSnapshotSelect = {
+  name: true,
+  spec: true,
+  quantity: true,
+  unit: true,
+  note: true,
+} as const;
+
+const snapshotItem = (it: {
+  name: string;
+  spec: string | null;
+  quantity: Prisma.Decimal;
+  unit: string;
+  note: string | null;
+}) => ({
+  name: it.name,
+  spec: it.spec,
+  quantity: it.quantity.toString(),
+  unit: it.unit,
+  note: it.note,
+});
+
+const dayOf = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
+
 // ─── Create and edit ─────────────────────────────────────────────────────────
 
 export type DraftData = z.output<typeof createRequestInput>;
@@ -153,17 +177,26 @@ export async function updateRequest(actor: Actor, requestId: string, raw: unknow
   const input = parseInput(updateRequestInput, raw);
   assertDateNotPast(input.desiredDate);
   return db.$transaction(async (tx) => {
+    // Lock first: a concurrent submit waits, so it checks the items this edit leaves behind.
+    await lockRequest(tx, actor, requestId);
     const req = await loadForAction(tx, actor, requestId);
     const access = await requireProjectAccess(tx, actor, req.projectId, { write: true });
     if (!isAuthor(actor, req, access)) throw new AppError("FORBIDDEN", errors.forbidden);
-    // Claim the row only while it is still a draft (guards against a concurrent submit).
-    const claimed = await tx.purchaseRequest.updateMany({
-      where: { id: requestId, status: "DRAFT" },
+    if (req.status !== "DRAFT") throw new AppError("CONFLICT", errors.requestNotEditable);
+
+    const previous = await tx.purchaseRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: {
+        note: true,
+        desiredDate: true,
+        priority: true,
+        items: { orderBy: { position: "asc" }, select: itemSnapshotSelect },
+      },
+    });
+    await tx.purchaseRequest.update({
+      where: { id: requestId },
       data: { desiredDate: input.desiredDate, priority: input.priority, note: input.note },
     });
-    if (claimed.count === 0) throw new AppError("CONFLICT", errors.requestNotEditable);
-
-    const before = await tx.requestItem.count({ where: { requestId } });
     await tx.requestItem.deleteMany({ where: { requestId } });
     await tx.requestItem.createMany({
       data: itemRows(input.items).map((r) => ({ ...r, requestId })),
@@ -173,11 +206,26 @@ export async function updateRequest(actor: Actor, requestId: string, raw: unknow
       entityId: requestId,
       projectId: req.projectId,
       action: "request.updated",
+      // Full before/after snapshot, so edited values stay traceable (CLAUDE.md audit rule).
       changes: {
-        itemCountBefore: before,
-        itemCountAfter: input.items.length,
-        desiredDate: input.desiredDate?.toISOString().slice(0, 10) ?? null,
-        priority: input.priority,
+        before: {
+          desiredDate: dayOf(previous.desiredDate),
+          priority: previous.priority,
+          note: previous.note,
+          items: previous.items.map(snapshotItem),
+        },
+        after: {
+          desiredDate: dayOf(input.desiredDate),
+          priority: input.priority,
+          note: input.note,
+          items: input.items.map((it) => ({
+            name: it.name,
+            spec: it.spec,
+            quantity: it.quantity,
+            unit: it.unit,
+            note: it.note,
+          })),
+        },
       },
     });
   });
@@ -195,14 +243,32 @@ type TransitionSpec = {
   reason?: string | null;
   data?: Prisma.PurchaseRequestUncheckedUpdateManyInput;
   check?: (tx: Tx, req: LoadedRequest) => Promise<void>;
+  /**
+   * The submission the reviewer saw (its submittedAt). A withdraw, edit and resubmit changes it,
+   * so a decision made on a stale page is refused instead of approving unseen content.
+   */
+  expectedSubmittedAt?: Date | null;
 };
 
-type LoadedRequest = { id: string; projectId: string; authorId: string; status: RequestStatus };
+type LoadedRequest = {
+  id: string;
+  projectId: string;
+  authorId: string;
+  status: RequestStatus;
+  submittedAt: Date | null;
+};
 
 async function loadForAction(tx: Tx, actor: Actor, requestId: string): Promise<LoadedRequest> {
   const req = await tx.purchaseRequest.findUnique({
     where: { id: requestId },
-    select: { id: true, projectId: true, authorId: true, status: true, organizationId: true },
+    select: {
+      id: true,
+      projectId: true,
+      authorId: true,
+      status: true,
+      submittedAt: true,
+      organizationId: true,
+    },
   });
   if (!req || req.organizationId !== actor.organizationId) throw notFound();
   return req;
@@ -222,10 +288,18 @@ function allowed(who: Who, actor: Actor, req: { authorId: string }, access: Proj
 
 async function transition(actor: Actor, requestId: string, spec: TransitionSpec) {
   return db.$transaction(async (tx) => {
+    // Lock the row: checks below (items, orders, receipts) see state no one can change meanwhile.
+    await lockRequest(tx, actor, requestId);
     const req = await loadForAction(tx, actor, requestId);
     const access = await requireProjectAccess(tx, actor, req.projectId, { write: true });
     if (!allowed(spec.who, actor, req, access)) throw new AppError("FORBIDDEN", errors.forbidden);
     if (!spec.from.includes(req.status)) throw new AppError("CONFLICT", errors.staleStatus);
+    if (
+      spec.expectedSubmittedAt !== undefined &&
+      req.submittedAt?.getTime() !== spec.expectedSubmittedAt?.getTime()
+    ) {
+      throw new AppError("CONFLICT", errors.requestChanged);
+    }
     await spec.check?.(tx, req);
     // Compare-and-set on the status: of two concurrent transitions only one succeeds.
     const updated = await tx.purchaseRequest.updateMany({
@@ -273,17 +347,30 @@ export async function withdrawRequest(actor: Actor, requestId: string) {
   });
 }
 
-export async function approveRequest(actor: Actor, requestId: string) {
+/** Review options: the submission the reviewer saw (always sent by the review forms). */
+export type ReviewOptions = { expectedSubmittedAt?: Date | null };
+
+export async function approveRequest(actor: Actor, requestId: string, opts: ReviewOptions = {}) {
   return transition(actor, requestId, {
     from: ["IN_REVIEW"],
     to: "APPROVED",
     who: "buyer",
     action: "request.approved",
     data: { reviewedAt: new Date(), reviewedById: actor.userId },
+    expectedSubmittedAt: opts.expectedSubmittedAt,
+    check: async (tx) => {
+      const items = await tx.requestItem.count({ where: { requestId } });
+      if (items === 0) throw new AppError("VALIDATION", errors.requestNoItems);
+    },
   });
 }
 
-export async function rejectRequest(actor: Actor, requestId: string, rawReason: unknown) {
+export async function rejectRequest(
+  actor: Actor,
+  requestId: string,
+  rawReason: unknown,
+  opts: ReviewOptions = {},
+) {
   const reason = reasonOf(rawReason);
   return transition(actor, requestId, {
     from: ["IN_REVIEW"],
@@ -292,6 +379,7 @@ export async function rejectRequest(actor: Actor, requestId: string, rawReason: 
     action: "request.rejected",
     reason,
     data: { reviewedAt: new Date(), reviewedById: actor.userId, rejectionReason: reason },
+    expectedSubmittedAt: opts.expectedSubmittedAt,
   });
 }
 
