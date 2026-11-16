@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { EmptyState, PageHeader } from "@/components/ui";
+import { ButtonLink, EmptyState, PageHeader } from "@/components/ui";
 import { todayInTbilisi } from "@/lib/format";
 import { projectsForNewRequest } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
@@ -18,7 +18,16 @@ export default async function NewRequestPage({ searchParams }: Props) {
 
   return (
     <>
-      <PageHeader title="ახალი მოთხოვნა" />
+      <PageHeader
+        title="ახალი მოთხოვნა"
+        actions={
+          projects.length > 0 ? (
+            <ButtonLink href="/requests/import" variant="secondary">
+              WhatsApp ტექსტიდან შემოტანა
+            </ButtonLink>
+          ) : undefined
+        }
+      />
       {projects.length === 0 ? (
         <EmptyState title="მოთხოვნის შექმნა ვერ ხერხდება">
           მოთხოვნის შესაქმნელად საჭიროა „მომთხოვნის“ როლი აქტიურ პროექტში. მიმართეთ ადმინისტრატორს.{" "}

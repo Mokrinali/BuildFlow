@@ -21,3 +21,6 @@ export const COMMON_UNITS = [
 export function formatRequestNumber(n: number): string {
   return `№${String(n).padStart(4, "0")}`;
 }
+
+/** Human-readable order number, e.g. 7 → "№0007". */
+export const formatOrderNumber = formatRequestNumber;

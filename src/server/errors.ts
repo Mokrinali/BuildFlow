@@ -1,7 +1,7 @@
 import { errors } from "@/lib/i18n/ka";
 
 export type AppErrorCode =
-  "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "VALIDATION";
+  "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "VALIDATION" | "RATE_LIMITED";
 
 /** An expected business error with a Georgian message that is safe to show to the user. */
 export class AppError extends Error {

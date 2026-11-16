@@ -71,3 +71,18 @@ export function formFlag(form: FormData, key: string): boolean {
   if (v === "0") return false;
   throw new AppError("VALIDATION", errors.invalidInput);
 }
+
+const MAX_PAYLOAD = 200_000; // characters; item caps are enforced by the services
+
+/** Read the JSON "payload" field that client forms with item rows send. */
+export function formPayload(form: FormData): unknown {
+  const raw = form.get("payload");
+  if (typeof raw !== "string" || raw.length > MAX_PAYLOAD) {
+    throw new AppError("VALIDATION", errors.invalidInput);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new AppError("VALIDATION", errors.invalidInput);
+  }
+}

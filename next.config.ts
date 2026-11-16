@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
   // Self-contained server bundle for the Docker image.
   output: "standalone",
   poweredByHeader: false,
+  // Dev logging of server action arguments would print pasted WhatsApp text (via the previous
+  // form state) to the terminal. CLAUDE.md forbids logging that text.
+  logging: { serverFunctions: false },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

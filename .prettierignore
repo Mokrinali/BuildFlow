@@ -6,3 +6,4 @@ package-lock.json
 public/
 branding/
 CLAUDE.md
+.claude/

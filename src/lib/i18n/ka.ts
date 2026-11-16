@@ -1,5 +1,7 @@
 // Georgian UI strings. Keep user-facing text here so it stays consistent.
 import type {
+  Currency,
+  OrderStatus,
   OrgRole,
   Priority,
   ProjectRole,
@@ -63,6 +65,25 @@ export const errors = {
   requestHasReceipts: "მიღების მქონე მოთხოვნის გაუქმება შეუძლებელია.",
   reasonRequired: "მიუთითეთ მიზეზი.",
   desiredDatePast: "სასურველი თარიღი წარსულშია.",
+  requestHasAnyOrders:
+    "მოთხოვნას შეკვეთები აქვს (გაუქმებულის ჩათვლით), ამიტომ მისი ხელახლა გახსნა შეუძლებელია.",
+  requestNotOrderable: "შეკვეთის გაფორმება შესაძლებელია მხოლოდ დამტკიცებულ მოთხოვნაზე.",
+  orderNoItems: "მიუთითეთ მინიმუმ ერთი პოზიცია დადებითი რაოდენობით.",
+  orderDuplicateItem: "ერთი პოზიცია შეკვეთაში ორჯერ არის მითითებული.",
+  orderItemForeign: "პოზიცია ამ მოთხოვნას არ ეკუთვნის.",
+  overOrder: "შეკვეთილი რაოდენობა აჭარბებს დამტკიცებულს.",
+  supplierRequired: "აირჩიეთ ან შეიყვანეთ მომწოდებელი.",
+  orderNotActive: "შეკვეთა გაუქმებულია.",
+  orderHasReceipts: "მიღების მქონე შეკვეთის გაუქმება შეუძლებელია.",
+  receiptNoItems: "მიუთითეთ მინიმუმ ერთი მიღებული რაოდენობა.",
+  receiptItemForeign: "პოზიცია ამ შეკვეთას არ ეკუთვნის.",
+  overReceipt: "მიღებული რაოდენობა აჭარბებს შეკვეთილს.",
+  receiptDateFuture: "მიღების თარიღი მომავალშია.",
+  correctionSame: "ახალი რაოდენობა ემთხვევა მიმდინარეს.",
+  correctionNegative: "შესწორების შემდეგ მიღებული რაოდენობა უარყოფითი გახდება.",
+  importRepeat:
+    "ეს ტექსტი ამ პროექტში უკვე შემოტანილია. თუ ხელახლა შემოტანა განზრახ გსურთ, მონიშნეთ შესაბამისი ველი.",
+  correctionOfCorrection: "შესწორდება მხოლოდ თავდაპირველი მიღების ჩანაწერი.",
 } as const;
 
 /** Badge tone per request status (always shown together with the text label). */
@@ -91,4 +112,41 @@ export const requestEventLabel: Record<string, string> = {
   "request.returned_to_draft": "დაბრუნდა მონახაზში",
   "request.reopened": "ხელახლა გაიხსნა შესაცვლელად",
   "request.cancelled": "გაუქმდა",
+  "request.imported": "მოთხოვნა შეიქმნა WhatsApp ტექსტიდან",
+  "request.status_changed": "სტატუსი შეიცვალა",
+};
+
+export const orderStatusLabel: Record<OrderStatus, string> = {
+  ACTIVE: "აქტიური",
+  CANCELLED: "გაუქმებული",
+};
+
+export const currencyLabel: Record<Currency, string> = {
+  GEL: "ლარი (GEL)",
+  USD: "დოლარი (USD)",
+  EUR: "ევრო (EUR)",
+};
+
+/** Delivery progress of an order (derived from received vs ordered quantities). */
+export type DeliveryState = "CANCELLED" | "AWAITING" | "PARTIAL" | "RECEIVED";
+
+export const deliveryStateLabel: Record<DeliveryState, string> = {
+  CANCELLED: "გაუქმებული",
+  AWAITING: "მოსალოდნელი",
+  PARTIAL: "ნაწილობრივ მიღებული",
+  RECEIVED: "მიღებული",
+};
+
+export const deliveryStateTone: Record<DeliveryState, "gray" | "navy" | "green" | "orange"> = {
+  CANCELLED: "gray",
+  AWAITING: "navy",
+  PARTIAL: "orange",
+  RECEIVED: "green",
+};
+
+export const orderEventLabel: Record<string, string> = {
+  "order.created": "შეკვეთა გაფორმდა",
+  "order.cancelled": "შეკვეთა გაუქმდა",
+  "receipt.created": "მიწოდება დაფიქსირდა",
+  "receipt.corrected": "მიღება შესწორდა",
 };

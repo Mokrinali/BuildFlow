@@ -76,6 +76,7 @@ model Organization {
   requests  PurchaseRequest[]
   orders    PurchaseOrder[]
   events    AuditEvent[]
+  imports   RequestImport[]
 }
 
 // Better Auth core table "user" plus BuildFlow fields.
@@ -103,6 +104,7 @@ model User {
   ordersCreated    PurchaseOrder[]
   receipts         Receipt[]
   events           AuditEvent[]
+  imports          RequestImport[]
 
   @@index([organizationId])
 }
@@ -176,6 +178,7 @@ model Project {
   memberships  ProjectMembership[]
   requests     PurchaseRequest[]
   events       AuditEvent[]
+  imports      RequestImport[]
 
   @@unique([organizationId, name])
   @@unique([id, organizationId])
@@ -224,6 +227,7 @@ model PurchaseRequest {
   reviewedBy   User?           @relation("RequestReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
   items        RequestItem[]
   orders       PurchaseOrder[]
+  importInfo   RequestImport?
 
   @@unique([organizationId, number])
   @@unique([id, organizationId])
@@ -344,6 +348,40 @@ model ReceiptItem {
   corrections ReceiptItem[] @relation("ReceiptCorrection")
 
   @@index([orderItemId])
+}
+
+// ─── WhatsApp text import ────────────────────────────────────────────────────
+
+// Technical metadata of a confirmed import. The pasted text itself is never stored:
+// only a SHA-256 hash of its canonical form, used to warn about importing the same text twice.
+model RequestImport {
+  id               String   @id @default(cuid())
+  organizationId   String
+  projectId        String
+  userId           String
+  requestId        String   @unique
+  // Generated when the preview is shown; a repeated confirm returns the same draft.
+  idempotencyKey   String
+  textHash         String
+  lineCount        Int
+  skippedLineCount Int
+  itemCount        Int
+  // Items that the parser flagged for clarification in the preview.
+  flaggedItemCount Int
+  // The user confirmed although the same text had been imported before.
+  repeatConfirmed  Boolean  @default(false)
+  // Request item position → original line number (no text).
+  sourceLines      Json?
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project         @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  request      PurchaseRequest @relation(fields: [requestId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@unique([requestId, organizationId])
+  @@unique([organizationId, idempotencyKey])
+  @@index([projectId, textHash])
 }
 
 // ─── Audit log ───────────────────────────────────────────────────────────────

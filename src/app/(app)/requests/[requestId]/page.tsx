@@ -3,10 +3,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RequestStatusBadge } from "@/components/request-status";
 import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
-import { formatDateTime, formatQuantity, formatWorkDate } from "@/lib/format";
-import { priorityLabel, requestEventLabel } from "@/lib/i18n/ka";
-import { formatRequestNumber } from "@/lib/units";
+import { formatDateTime, formatMoney, formatQuantity, formatWorkDate } from "@/lib/format";
+import {
+  orderEventLabel,
+  orderStatusLabel,
+  priorityLabel,
+  requestEventLabel,
+  requestStatusLabel,
+} from "@/lib/i18n/ka";
+import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
+import type { RequestStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/server/errors";
+import { totalsByCurrency } from "@/server/orders/service";
 import { getRequest } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
 import { RequestActions } from "./request-actions";
@@ -27,12 +35,23 @@ const notices: Record<string, { ok: boolean; text: string; status: string }> = {
     text: "მოთხოვნა შენახულია და გაიგზავნა განსახილველად.",
     status: "IN_REVIEW",
   },
+  imported: {
+    ok: true,
+    status: "DRAFT",
+    text: "მონახაზი შეიქმნა WhatsApp ტექსტიდან. შეამოწმეთ და გაგზავნეთ განსახილველად.",
+  },
   "saved-not-submitted": {
     ok: false,
     status: "DRAFT",
     text: "მონახაზი შენახულია, მაგრამ გაგზავნა ვერ მოხერხდა. შეამოწმეთ პოზიციები და თარიღი.",
   },
 };
+
+/** Target status of a status-change event ({ from, to } in the audit record). */
+function statusTo(changes: unknown): RequestStatus | null {
+  const to = (changes as { to?: unknown } | null)?.to;
+  return typeof to === "string" && to in requestStatusLabel ? (to as RequestStatus) : null;
+}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -63,10 +82,19 @@ export default async function RequestPage({ params, searchParams }: Props) {
       <PageHeader
         title={`მოთხოვნა ${formatRequestNumber(request.number)}`}
         actions={
-          permissions.canEdit ? (
-            <ButtonLink href={`/requests/${request.id}/edit`} variant="secondary">
-              რედაქტირება
-            </ButtonLink>
+          permissions.canEdit || permissions.canOrder ? (
+            <>
+              {permissions.canOrder && (
+                <ButtonLink href={`/orders/new?request=${request.id}`}>
+                  შეკვეთის გაფორმება
+                </ButtonLink>
+              )}
+              {permissions.canEdit && (
+                <ButtonLink href={`/requests/${request.id}/edit`} variant="secondary">
+                  რედაქტირება
+                </ButtonLink>
+              )}
+            </>
           ) : undefined
         }
       />
@@ -203,16 +231,42 @@ export default async function RequestPage({ params, searchParams }: Props) {
             <h2 className="mb-2 text-lg font-semibold">დაკავშირებული შეკვეთები</h2>
             {orders.length === 0 ? (
               <p className="text-sm text-steel-600">
-                შეკვეთები ჯერ არ არის. შეკვეთების გაფორმება შემდეგ ეტაპზე დაემატება.
+                {permissions.canOrder
+                  ? "შეკვეთები ჯერ არ არის. გააფორმეთ ღილაკით „შეკვეთის გაფორმება“."
+                  : "შეკვეთები ჯერ არ არის."}
               </p>
             ) : (
-              <ul className="text-sm">
-                {orders.map((o) => (
-                  <li key={o.id}>
-                    შეკვეთა №{o.number} · {o.supplier.name}
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="divide-y divide-line text-sm">
+                  {orders.map((o) => (
+                    <li key={o.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                      <Link
+                        href={`/orders/${o.id}`}
+                        className="font-semibold underline underline-offset-4"
+                      >
+                        შეკვეთა {formatOrderNumber(o.number)}
+                      </Link>
+                      <span>{o.supplier.name}</span>
+                      <span className="whitespace-nowrap">{formatMoney(o.total, o.currency)}</span>
+                      {o.plannedDeliveryDate && (
+                        <span className="text-steel-600">
+                          მიწოდება: {formatWorkDate(o.plannedDeliveryDate)}
+                        </span>
+                      )}
+                      {o.status === "CANCELLED" && (
+                        <span className="text-steel-600">({orderStatusLabel.CANCELLED})</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {/* Active orders only; each currency is summed separately. */}
+                <p className="mt-3 border-t border-line pt-3 text-sm font-semibold">
+                  ჯამი:{" "}
+                  {totalsByCurrency(orders.filter((o) => o.status === "ACTIVE"))
+                    .map((t) => formatMoney(t.total, t.currency))
+                    .join(" · ") || "—"}
+                </p>
+              </>
             )}
           </Card>
         </div>
@@ -224,7 +278,16 @@ export default async function RequestPage({ params, searchParams }: Props) {
             <ol className="flex flex-col gap-3 text-sm">
               {events.map((e) => (
                 <li key={e.id}>
-                  <p>{requestEventLabel[e.action] ?? e.action}</p>
+                  <p>
+                    {e.entityType === "PurchaseOrder"
+                      ? (orderEventLabel[e.action] ?? e.action)
+                      : (requestEventLabel[e.action] ?? e.action)}
+                    {e.action === "request.status_changed" && statusTo(e.changes) && (
+                      <>
+                        : <strong>{requestStatusLabel[statusTo(e.changes)!]}</strong>
+                      </>
+                    )}
+                  </p>
                   {e.reason && <p className="text-steel-600">„{e.reason}“</p>}
                   <p className="text-xs text-steel-600">
                     {formatDateTime(e.createdAt)} · {e.actor?.name ?? "სისტემა"}

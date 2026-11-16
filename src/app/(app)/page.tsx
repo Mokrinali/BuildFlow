@@ -2,12 +2,45 @@ import Link from "next/link";
 import { RequestStatusBadge } from "@/components/request-status";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
 import { formatWorkDate } from "@/lib/format";
-import { formatRequestNumber } from "@/lib/units";
+import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
+import { orderDashboard } from "@/server/orders/service";
 import { listProjects } from "@/server/projects/service";
 import { requestDashboard } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
 
 type Props = { searchParams: Promise<{ password?: string }> };
+
+type DashOrder = Awaited<ReturnType<typeof orderDashboard>>["overdue"][number];
+
+/** Short order list with an action link to the order (where it is received). */
+function OrderList({ orders, overdue }: { orders: DashOrder[]; overdue?: boolean }) {
+  return (
+    <ul className="mt-4 flex flex-col gap-3 border-t border-line pt-3 text-sm">
+      {orders.map((o) => (
+        <li key={o.id}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold">შეკვეთა {formatOrderNumber(o.number)}</span>
+            <Link
+              href={`/orders/${o.id}`}
+              className="font-medium underline underline-offset-4"
+              aria-label={`შეკვეთა ${formatOrderNumber(o.number)}: ${o.canReceive ? "მიღება" : "ნახვა"}`}
+            >
+              {o.canReceive ? "მიღება →" : "ნახვა →"}
+            </Link>
+          </div>
+          <p className="text-steel-600">
+            {o.supplier.name} · {o.request.project.name}
+          </p>
+          <p className={overdue ? "font-medium text-red-800" : "text-steel-600"}>
+            {o.plannedDeliveryDate
+              ? `${overdue ? "ვადა გავიდა: " : "მიწოდება: "}${formatWorkDate(o.plannedDeliveryDate)}`
+              : "თარიღი არ არის მითითებული"}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Stat({ href, value, label }: { href: string; value: number; label: string }) {
   return (
@@ -20,9 +53,10 @@ function Stat({ href, value, label }: { href: string; value: number; label: stri
 
 export default async function DashboardPage({ searchParams }: Props) {
   const user = await requireUser();
-  const [projects, dash, { password }] = await Promise.all([
+  const [projects, dash, orders, { password }] = await Promise.all([
     listProjects(user),
     requestDashboard(user),
+    orderDashboard(user),
     searchParams,
   ]);
 
@@ -45,6 +79,9 @@ export default async function DashboardPage({ searchParams }: Props) {
               label="განსახილველი"
             />
             <Stat href="/requests" value={dash.open} label="ღია მოთხოვნა" />
+            {dash.toOrder > 0 && (
+              <Stat href="/requests?status=APPROVED" value={dash.toOrder} label="შესაკვეთი" />
+            )}
             {dash.myDrafts > 0 && (
               <Stat href="/requests?status=DRAFT" value={dash.myDrafts} label="ჩემი მონახაზი" />
             )}
@@ -70,12 +107,26 @@ export default async function DashboardPage({ searchParams }: Props) {
           )}
         </Card>
         <Card>
-          <h2 className="font-semibold">ვადაგადაცილებული მიწოდებები</h2>
-          <p className="mt-2 text-sm text-steel-600">ჩანს შეკვეთების მოდულის დამატების შემდეგ.</p>
+          <h2 className="mb-3 font-semibold">ვადაგადაცილებული მიწოდებები</h2>
+          <Stat
+            href="/orders?delivery=overdue"
+            value={orders.overdueCount}
+            label="ვადაგადაცილებული"
+          />
+          {orders.overdue.length > 0 ? (
+            <OrderList orders={orders.overdue} overdue />
+          ) : (
+            <p className="mt-3 text-sm text-steel-600">ვადაგადაცილებული მიწოდება არ არის.</p>
+          )}
         </Card>
         <Card>
-          <h2 className="font-semibold">მისაღები შეკვეთები</h2>
-          <p className="mt-2 text-sm text-steel-600">ჩანს მიღების მოდულის დამატების შემდეგ.</p>
+          <h2 className="mb-3 font-semibold">მისაღები შეკვეთები</h2>
+          <Stat href="/orders?delivery=open" value={orders.toReceiveCount} label="მისაღები" />
+          {orders.toReceive.length > 0 ? (
+            <OrderList orders={orders.toReceive} />
+          ) : (
+            <p className="mt-3 text-sm text-steel-600">მისაღები შეკვეთა არ არის.</p>
+          )}
         </Card>
       </div>
 

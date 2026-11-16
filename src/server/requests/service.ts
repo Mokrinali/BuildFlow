@@ -11,6 +11,7 @@ import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
+import { ORDERABLE } from "@/server/orders/progress";
 import { AppError, notFound } from "@/server/errors";
 import { parseInput } from "@/server/validation";
 
@@ -94,43 +95,57 @@ const itemRows = (items: ItemData[]) =>
 
 // ─── Create and edit ─────────────────────────────────────────────────────────
 
+export type DraftData = z.output<typeof createRequestInput>;
+
+/**
+ * Insert a numbered draft inside the caller's transaction (shared with the WhatsApp import).
+ * Requires the REQUESTER role in an active project (admins pass). Input must already be parsed.
+ */
+export async function insertDraft(
+  tx: Tx,
+  actor: Actor,
+  input: DraftData,
+  audit: { action?: string; changes?: Record<string, Prisma.InputJsonValue> } = {},
+) {
+  assertDateNotPast(input.desiredDate);
+  await requireProjectAccess(tx, actor, input.projectId, {
+    requiredRoles: ["REQUESTER"],
+    write: true,
+  });
+  // Row lock on the organization serializes numbering: numbers are unique and gap-free.
+  const org = await tx.organization.update({
+    where: { id: actor.organizationId },
+    data: { requestSeq: { increment: 1 } },
+    select: { requestSeq: true },
+  });
+  const request = await tx.purchaseRequest.create({
+    data: {
+      organizationId: actor.organizationId,
+      number: org.requestSeq,
+      projectId: input.projectId,
+      authorId: actor.userId,
+      desiredDate: input.desiredDate,
+      priority: input.priority,
+      note: input.note,
+      items: { create: itemRows(input.items) },
+    },
+    select: { id: true, number: true },
+  });
+  await recordEvent(tx, actor, {
+    entityType: "PurchaseRequest",
+    entityId: request.id,
+    projectId: input.projectId,
+    action: audit.action ?? "request.created",
+    changes: { number: request.number, itemCount: input.items.length, ...audit.changes },
+  });
+  return request;
+}
+
 /** Create a draft. Requires the REQUESTER role in an active project (admins pass). */
 export async function createRequest(actor: Actor, raw: unknown) {
   const input = parseInput(createRequestInput, raw);
   assertDateNotPast(input.desiredDate);
-  return db.$transaction(async (tx) => {
-    await requireProjectAccess(tx, actor, input.projectId, {
-      requiredRoles: ["REQUESTER"],
-      write: true,
-    });
-    // Row lock on the organization serializes numbering: numbers are unique and gap-free.
-    const org = await tx.organization.update({
-      where: { id: actor.organizationId },
-      data: { requestSeq: { increment: 1 } },
-      select: { requestSeq: true },
-    });
-    const request = await tx.purchaseRequest.create({
-      data: {
-        organizationId: actor.organizationId,
-        number: org.requestSeq,
-        projectId: input.projectId,
-        authorId: actor.userId,
-        desiredDate: input.desiredDate,
-        priority: input.priority,
-        note: input.note,
-        items: { create: itemRows(input.items) },
-      },
-      select: { id: true, number: true },
-    });
-    await recordEvent(tx, actor, {
-      entityType: "PurchaseRequest",
-      entityId: request.id,
-      projectId: input.projectId,
-      action: "request.created",
-      changes: { number: request.number, itemCount: input.items.length },
-    });
-    return request;
-  });
+  return db.$transaction((tx) => insertDraft(tx, actor, input));
 }
 
 /** Edit a draft (author or admin). Items are replaced as a whole. */
@@ -291,7 +306,10 @@ export async function returnToDraft(actor: Actor, requestId: string) {
   });
 }
 
-/** Re-open an approved request for changes (needs re-review). Not allowed once ordered. */
+/**
+ * Re-open an approved request for changes (needs re-review). Not allowed once any order exists,
+ * cancelled ones included: editing replaces the items, and order lines keep pointing at them.
+ */
 export async function reopenRequest(actor: Actor, requestId: string, rawReason: unknown) {
   const reason = reasonOf(rawReason);
   return transition(actor, requestId, {
@@ -302,8 +320,8 @@ export async function reopenRequest(actor: Actor, requestId: string, rawReason: 
     reason,
     data: { reviewedAt: null, reviewedById: null },
     check: async (tx) => {
-      const orders = await tx.purchaseOrder.count({ where: { requestId, status: "ACTIVE" } });
-      if (orders > 0) throw new AppError("CONFLICT", errors.requestHasOrders);
+      const orders = await tx.purchaseOrder.count({ where: { requestId } });
+      if (orders > 0) throw new AppError("CONFLICT", errors.requestHasAnyOrders);
     },
   });
 }
@@ -319,10 +337,14 @@ export async function cancelRequest(actor: Actor, requestId: string, rawReason: 
     reason,
     data: { cancelReason: reason },
     check: async (tx) => {
-      const receipts = await tx.receiptItem.count({
+      // Net quantity: a receipt fully corrected to zero does not block cancellation.
+      const received = await tx.receiptItem.aggregate({
         where: { orderItem: { order: { requestId } } },
+        _sum: { quantity: true },
       });
-      if (receipts > 0) throw new AppError("CONFLICT", errors.requestHasReceipts);
+      if (received._sum.quantity && !received._sum.quantity.isZero()) {
+        throw new AppError("CONFLICT", errors.requestHasReceipts);
+      }
       const orders = await tx.purchaseOrder.count({ where: { requestId, status: "ACTIVE" } });
       if (orders > 0) throw new AppError("CONFLICT", errors.requestHasOrders);
     },
@@ -340,12 +362,14 @@ export type RequestPermissions = {
   canReturnToDraft: boolean;
   canReopen: boolean;
   canCancel: boolean;
+  canOrder: boolean;
 };
 
 function permissionsFor(
   actor: Actor,
   req: { authorId: string; status: RequestStatus },
   access: ProjectAccess,
+  ctx: { hasOrders: boolean; anyToOrder: boolean },
 ): RequestPermissions {
   const none: RequestPermissions = {
     canEdit: false,
@@ -356,6 +380,7 @@ function permissionsFor(
     canReturnToDraft: false,
     canReopen: false,
     canCancel: false,
+    canOrder: false,
   };
   if (access.archived) return none;
   const author = isAuthor(actor, req, access);
@@ -368,10 +393,11 @@ function permissionsFor(
     canApprove: buyer && s === "IN_REVIEW",
     canReject: buyer && s === "IN_REVIEW",
     canReturnToDraft: author && s === "REJECTED",
-    canReopen: (author || buyer) && s === "APPROVED",
+    canReopen: (author || buyer) && s === "APPROVED" && !ctx.hasOrders,
     canCancel:
       (author || buyer) &&
       ["DRAFT", "IN_REVIEW", "APPROVED", "REJECTED", "PARTIALLY_ORDERED", "ORDERED"].includes(s),
+    canOrder: buyer && ORDERABLE.includes(s) && ctx.anyToOrder,
   };
 }
 
@@ -406,6 +432,7 @@ export async function getRequest(actor: Actor, requestId: string) {
           currency: true,
           plannedDeliveryDate: true,
           supplier: { select: { name: true } },
+          items: { select: { quantity: true, unitPrice: true } },
         },
       },
     },
@@ -432,12 +459,29 @@ export async function getRequest(actor: Actor, requestId: string) {
     };
   });
 
+  const orders = req.orders.map(({ items: lines, ...o }) => ({
+    ...o,
+    total: sum(
+      lines.map((l) =>
+        l.quantity.times(l.unitPrice).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
+      ),
+    ).toString(),
+  }));
+
+  // The request timeline also shows its orders and deliveries.
   const events = await db.auditEvent.findMany({
-    where: { entityType: "PurchaseRequest", entityId: requestId },
+    where: {
+      OR: [
+        { entityType: "PurchaseRequest", entityId: requestId },
+        { entityType: "PurchaseOrder", entityId: { in: orders.map((o) => o.id) } },
+      ],
+    },
     orderBy: { seq: "desc" },
     select: {
       id: true,
       action: true,
+      entityType: true,
+      changes: true,
       reason: true,
       createdAt: true,
       actor: { select: { name: true } },
@@ -462,10 +506,13 @@ export async function getRequest(actor: Actor, requestId: string) {
       reviewedBy: req.reviewedBy,
     },
     items,
-    orders: req.orders,
+    orders,
     events,
     access,
-    permissions: permissionsFor(actor, req, access),
+    permissions: permissionsFor(actor, req, access, {
+      hasOrders: orders.length > 0,
+      anyToOrder: items.some((i) => new Prisma.Decimal(i.quantity).gt(i.ordered)),
+    }),
   };
 }
 
@@ -563,12 +610,14 @@ export async function requestDashboard(actor: Actor) {
         organizationId: actor.organizationId,
         project: { memberships: { some: { userId: actor.userId, roles: { has: "BUYER" } } } },
       };
-  const [open, awaitingReview, myDrafts, recent] = await Promise.all([
+  const [open, awaitingReview, myDrafts, toOrder, recent] = await Promise.all([
     db.purchaseRequest.count({ where: { AND: [visible, { status: { in: OPEN_STATUSES } }] } }),
     db.purchaseRequest.count({ where: { AND: [buyerScope, { status: "IN_REVIEW" }] } }),
     db.purchaseRequest.count({
       where: { AND: [visible, { status: "DRAFT", authorId: actor.userId }] },
     }),
+    // Approved and not ordered at all yet: the buyer's next step.
+    db.purchaseRequest.count({ where: { AND: [buyerScope, { status: "APPROVED" }] } }),
     db.purchaseRequest.findMany({
       where: { AND: [visible, { status: { in: OPEN_STATUSES } }] },
       orderBy: { number: "desc" },
@@ -582,7 +631,7 @@ export async function requestDashboard(actor: Actor) {
       },
     }),
   ]);
-  return { open, awaitingReview, myDrafts, recent };
+  return { open, awaitingReview, myDrafts, toOrder, recent };
 }
 
 /** Active projects where the actor may create requests (REQUESTER role, or admin). */

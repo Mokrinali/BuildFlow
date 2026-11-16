@@ -53,7 +53,14 @@ export default async function RequestsPage({ searchParams }: Props) {
     <>
       <PageHeader
         title="მოთხოვნები"
-        actions={<ButtonLink href="/requests/new">ახალი მოთხოვნა</ButtonLink>}
+        actions={
+          <>
+            <ButtonLink href="/requests/import" variant="secondary">
+              WhatsApp ტექსტის იმპორტი
+            </ButtonLink>
+            <ButtonLink href="/requests/new">ახალი მოთხოვნა</ButtonLink>
+          </>
+        }
       />
 
       {/* GET form: filters live in the URL, so they survive reloads and can be shared. */}

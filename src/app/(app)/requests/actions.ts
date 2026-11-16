@@ -2,9 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { errors } from "@/lib/i18n/ka";
-import { formId, runAction, type ActionState } from "@/server/action";
-import { AppError } from "@/server/errors";
+import { formId, formPayload, runAction, type ActionState } from "@/server/action";
 import {
   approveRequest,
   cancelRequest,
@@ -18,20 +16,6 @@ import {
 } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
 
-const MAX_PAYLOAD = 200_000; // characters; the item cap is enforced by the service
-
-function readPayload(form: FormData): unknown {
-  const raw = form.get("payload");
-  if (typeof raw !== "string" || raw.length > MAX_PAYLOAD) {
-    throw new AppError("VALIDATION", errors.invalidInput);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new AppError("VALIDATION", errors.invalidInput);
-  }
-}
-
 /**
  * Create (no requestId field) or edit a draft; `intent=submit` also sends it for review.
  * Ids come from hidden form fields (see formId in server/action.ts for why not .bind()).
@@ -43,7 +27,7 @@ export async function saveRequestAction(_: ActionState, form: FormData): Promise
   let id = requestId ?? "";
   let saved = false;
   const state = await runAction(async () => {
-    const payload = readPayload(form);
+    const payload = formPayload(form);
     if (requestId) {
       id = formId(form, "requestId");
       await updateRequest(user, id, payload);
