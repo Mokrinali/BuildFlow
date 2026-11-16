@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+/* Brand tokens (CLAUDE.md). Orange buttons use navy text for contrast. */
+@theme {
+  --color-navy: #092648;
+  --color-navy-700: #163a63;
+  --color-orange: #ff7900;
+  --color-orange-600: #e56c00;
+  --color-steel: #758493;
+  --color-steel-600: #5c6a78;
+  --color-offwhite: #f5f7fa;
+  --color-line: #d9dfe6;
+
+  --font-sans: var(--font-georgian), system-ui, "Segoe UI", sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-offwhite);
+  color: var(--color-navy);
+}
+
+/* Visible keyboard focus everywhere. */
+:focus-visible {
+  outline: 3px solid var(--color-orange);
+  outline-offset: 2px;
+}

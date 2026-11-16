@@ -1,0 +1,362 @@
+// BuildFlow data model.
+// Quantities: Decimal(14,3). Money: Decimal(14,2). Work dates: @db.Date (Asia/Tbilisi calendar day).
+// Timestamps: timestamptz, stored in UTC.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum OrgRole {
+  ADMIN
+  MEMBER
+}
+
+enum ProjectRole {
+  REQUESTER
+  BUYER
+  RECEIVER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum RequestStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  PARTIALLY_ORDERED
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum OrderStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum Currency {
+  GEL
+  USD
+  EUR
+}
+
+// ─── Organization and users ──────────────────────────────────────────────────
+
+model Organization {
+  id         String   @id @default(cuid())
+  name       String
+  // Per-organization counters for human-readable numbers (incremented in a transaction).
+  requestSeq Int      @default(0)
+  orderSeq   Int      @default(0)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  users     User[]
+  projects  Project[]
+  suppliers Supplier[]
+  requests  PurchaseRequest[]
+  orders    PurchaseOrder[]
+  events    AuditEvent[]
+}
+
+// Better Auth core table "user" plus BuildFlow fields.
+model User {
+  id             String   @id
+  name           String
+  email          String   @unique
+  emailVerified  Boolean  @default(false)
+  image          String?
+  organizationId String
+  orgRole        OrgRole  @default(MEMBER)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  sessions     Session[]
+  accounts     Account[]
+  memberships  ProjectMembership[]
+
+  requestsAuthored PurchaseRequest[] @relation("RequestAuthor")
+  requestsReviewed PurchaseRequest[] @relation("RequestReviewer")
+  ordersCreated    PurchaseOrder[]
+  receipts         Receipt[]
+  events           AuditEvent[]
+
+  @@index([organizationId])
+}
+
+// ─── Better Auth tables ──────────────────────────────────────────────────────
+
+model Session {
+  id        String   @id
+  expiresAt DateTime @db.Timestamptz(3)
+  token     String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+}
+
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+}
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+
+model Project {
+  id             String        @id @default(cuid())
+  organizationId String
+  name           String
+  address        String
+  status         ProjectStatus @default(ACTIVE)
+  archivedAt     DateTime?     @db.Timestamptz(3)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberships  ProjectMembership[]
+  requests     PurchaseRequest[]
+  events       AuditEvent[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
+}
+
+model ProjectMembership {
+  id        String        @id @default(cuid())
+  projectId String
+  userId    String
+  roles     ProjectRole[]
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+// ─── Requests ────────────────────────────────────────────────────────────────
+
+model PurchaseRequest {
+  id              String        @id @default(cuid())
+  organizationId  String
+  number          Int
+  projectId       String
+  authorId        String
+  desiredDate     DateTime?     @db.Date
+  priority        Priority      @default(NORMAL)
+  note            String?
+  status          RequestStatus @default(DRAFT)
+  submittedAt     DateTime?     @db.Timestamptz(3)
+  reviewedAt      DateTime?     @db.Timestamptz(3)
+  reviewedById    String?
+  rejectionReason String?
+  cancelReason    String?
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  author       User            @relation("RequestAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  reviewedBy   User?           @relation("RequestReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  items        RequestItem[]
+  orders       PurchaseOrder[]
+
+  @@unique([organizationId, number])
+  @@index([projectId, status])
+  @@index([organizationId, status, createdAt])
+}
+
+model RequestItem {
+  id        String  @id @default(cuid())
+  requestId String
+  position  Int
+  name      String
+  spec      String?
+  quantity  Decimal @db.Decimal(14, 3)
+  unit      String
+  note      String?
+
+  request    PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([requestId, position])
+}
+
+// ─── Suppliers and orders ────────────────────────────────────────────────────
+
+model Supplier {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  taxId          String?
+  phone          String?
+  email          String?
+  note           String?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  orders       PurchaseOrder[]
+
+  @@unique([organizationId, name])
+}
+
+model PurchaseOrder {
+  id                  String      @id @default(cuid())
+  organizationId      String
+  number              Int
+  requestId           String
+  supplierId          String
+  currency            Currency    @default(GEL)
+  plannedDeliveryDate DateTime?   @db.Date
+  status              OrderStatus @default(ACTIVE)
+  cancelReason        String?
+  createdById         String
+  createdAt           DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime    @updatedAt @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  request      PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  supplier     Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy    User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  items        OrderItem[]
+  receipts     Receipt[]
+
+  @@unique([organizationId, number])
+  @@index([requestId])
+  @@index([supplierId])
+  @@index([organizationId, status, plannedDeliveryDate])
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  requestItemId String
+  quantity      Decimal @db.Decimal(14, 3)
+  unitPrice     Decimal @db.Decimal(14, 2)
+  note          String?
+
+  order        PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  requestItem  RequestItem   @relation(fields: [requestItemId], references: [id], onDelete: Restrict)
+  receiptItems ReceiptItem[]
+
+  @@unique([orderId, requestItemId])
+  @@index([requestItemId])
+}
+
+// ─── Receipts ────────────────────────────────────────────────────────────────
+
+model Receipt {
+  id           String   @id @default(cuid())
+  orderId      String
+  receivedOn   DateTime @db.Date
+  receivedById String
+  note         String?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  order      PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  receivedBy User          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  items      ReceiptItem[]
+
+  @@index([orderId])
+}
+
+model ReceiptItem {
+  id          String  @id @default(cuid())
+  receiptId   String
+  orderItemId String
+  // Negative values are corrections; confirmed rows are never edited in place.
+  quantity    Decimal @db.Decimal(14, 3)
+  correctsId  String?
+  note        String?
+
+  receipt     Receipt       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  corrects    ReceiptItem?  @relation("ReceiptCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
+  corrections ReceiptItem[] @relation("ReceiptCorrection")
+
+  @@index([orderItemId])
+}
+
+// ─── Audit log ───────────────────────────────────────────────────────────────
+
+model AuditEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String?
+  actorId        String?
+  entityType     String
+  entityId       String
+  action         String
+  changes        Json?
+  reason         String?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([projectId, createdAt])
+}
