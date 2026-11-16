@@ -259,6 +259,7 @@ function ImportReview({
         projectId: preview.projectId,
         idempotencyKey: preview.idempotencyKey,
         textHash: preview.textHash,
+        token: preview.token,
         allowRepeat,
         desiredDate,
         priority,

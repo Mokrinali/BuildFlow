@@ -148,6 +148,54 @@ describe("password change and reset", () => {
   });
 });
 
+describe("guessing limits (code review findings)", () => {
+  it("limits attempts to guess the current password when changing it", async () => {
+    const u = await users.createUser(admin, {
+      name: "ცდების ლიმიტი",
+      email: "limit@test.example",
+      password: "temporary-pass-1",
+    });
+    const actor = { userId: u.id, organizationId: admin.organizationId, isAdmin: false };
+    for (let i = 0; i < users.PASSWORD_CHANGE_LIMIT_PER_MINUTE; i++) {
+      await expectAppError(
+        users.changeOwnPassword(actor, "no-session", {
+          currentPassword: `wrong-guess-${i}`,
+          newPassword: "brand-new-pass-1",
+          confirmPassword: "brand-new-pass-1",
+        }),
+        "VALIDATION",
+      );
+    }
+    await expectAppError(
+      users.changeOwnPassword(actor, "no-session", {
+        currentPassword: "temporary-pass-1",
+        newPassword: "brand-new-pass-1",
+        confirmPassword: "brand-new-pass-1",
+      }),
+      "RATE_LIMITED",
+    );
+  });
+
+  it("limits sign-in attempts per account, not only per address", async () => {
+    await users.createUser(admin, {
+      name: "შესვლის ლიმიტი",
+      email: "login-limit@test.example",
+      password: "temporary-pass-1",
+    });
+    const { LOGIN_LIMIT_PER_ACCOUNT } = await import("@/lib/auth");
+    for (let i = 0; i < LOGIN_LIMIT_PER_ACCOUNT; i++) {
+      await signInFails("login-limit@test.example", `wrong-password-${i}`);
+    }
+    // Even the right password is refused until the window passes.
+    const err = (await signIn("Login-Limit@test.example", "temporary-pass-1").then(
+      () => null,
+      (e: unknown) => e,
+    )) as { status?: unknown; statusCode?: unknown } | null;
+    expect(err).not.toBeNull();
+    expect([err?.status, err?.statusCode]).toContain(429);
+  });
+});
+
 describe("organization bootstrap", () => {
   it("creates an organization with a working admin login", async () => {
     const r = await users.createOrganizationWithAdmin({

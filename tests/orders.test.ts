@@ -431,6 +431,19 @@ describe("receipts", () => {
     expect(req.events.filter((e) => e.action === "receipt.created")).toHaveLength(2);
   });
 
+  it("refuses a delivery dated before the order", async () => {
+    const { orderId, cement } = await orderedRequest();
+    const err = await expectAppError(
+      createReceipt(receiver, {
+        orderId,
+        receivedOn: "2020-01-15",
+        items: [{ orderItemId: cement, quantity: "1" }],
+      }),
+      "VALIDATION",
+    );
+    expect(err.fieldErrors?.receivedOn).toBeTruthy();
+  });
+
   it("blocks receiving more than ordered", async () => {
     const { orderId, cement } = await orderedRequest();
     await createReceipt(receiver, {

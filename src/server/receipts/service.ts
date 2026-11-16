@@ -126,6 +126,16 @@ export async function createReceipt(actor: Actor, raw: unknown) {
 
   return db.$transaction(async (tx) => {
     const req = await lockOrderForReceipt(tx, actor, input.orderId);
+    const order = await tx.purchaseOrder.findUniqueOrThrow({
+      where: { id: input.orderId },
+      select: { createdAt: true },
+    });
+    // A delivery cannot predate the order (dates compared as Tbilisi calendar days).
+    if (input.receivedOn.toISOString().slice(0, 10) < todayInTbilisi(order.createdAt)) {
+      throw new AppError("VALIDATION", errors.receiptBeforeOrder, {
+        receivedOn: errors.receiptBeforeOrder,
+      });
+    }
     const progress = await orderItemProgress(tx, input.orderId);
     const fieldErrors: Record<string, string> = {};
     input.items.forEach((it, i) => {

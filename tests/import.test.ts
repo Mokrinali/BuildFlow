@@ -48,6 +48,7 @@ function payloadFrom(p: ImportPreview, fix: Record<number, Partial<Record<string
     projectId: p.projectId,
     idempotencyKey: p.idempotencyKey,
     textHash: p.textHash,
+    token: p.token,
     desiredDate: p.desiredDate?.value ?? "",
     priority: "NORMAL",
     note: "",
@@ -269,19 +270,58 @@ describe("confirm", () => {
     expect(other.duplicateOf).toBeNull();
   });
 
-  it("re-checks access on confirm instead of trusting the preview", async () => {
+  it("refuses tampered preview metadata", async () => {
     const p = await previewImport(requester, { projectId, text: TEXT });
     const payload = payloadFrom(p, { 2: { unit: "მ³" } });
     await expectAppError(
-      confirmImport(buyer, { ...payload, idempotencyKey: randomUUID() }),
-      "FORBIDDEN",
+      confirmImport(requester, { ...payload, textHash: "0".repeat(64) }),
+      "VALIDATION",
     );
     await expectAppError(
-      confirmImport(otherOrgAdmin, { ...payload, idempotencyKey: randomUUID() }),
-      "NOT_FOUND",
+      confirmImport(requester, { ...payload, stats: { ...payload.stats, lineCount: 1 } }),
+      "VALIDATION",
     );
+    // A preview made for one user cannot be confirmed by another.
+    await addMembership(projectId, admin.userId, ["REQUESTER"]);
+    await expectAppError(confirmImport(admin, payload), "VALIDATION");
+    expect(await db.purchaseRequest.count()).toBe(0);
+  });
+
+  it("lets only one of two parallel previews of the same text through without allowRepeat", async () => {
+    const [a, b] = await Promise.all([
+      previewImport(requester, { projectId, text: TEXT }),
+      previewImport(requester, { projectId, text: TEXT }),
+    ]);
+    const results = await Promise.allSettled([
+      confirmImport(requester, payloadFrom(a, { 2: { unit: "მ³" } })),
+      confirmImport(requester, payloadFrom(b, { 2: { unit: "მ³" } })),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(await db.purchaseRequest.count()).toBe(1);
+  });
+
+  it("re-checks access on confirm instead of trusting the preview", async () => {
+    const p = await previewImport(requester, { projectId, text: TEXT });
+    const payload = payloadFrom(p, { 2: { unit: "მ³" } });
+    // Someone else's preview (or a changed key) fails the signature before anything else.
+    await expectAppError(
+      confirmImport(buyer, { ...payload, idempotencyKey: randomUUID() }),
+      "VALIDATION",
+    );
+    await expectAppError(confirmImport(otherOrgAdmin, payload), "VALIDATION");
+    // The requester loses the role after the preview: the confirm is refused.
+    await db.projectMembership.updateMany({
+      where: { projectId, userId: requester.userId },
+      data: { roles: ["RECEIVER"] },
+    });
+    await expectAppError(confirmImport(requester, payload), "FORBIDDEN");
+    await db.projectMembership.updateMany({
+      where: { projectId, userId: requester.userId },
+      data: { roles: ["REQUESTER"] },
+    });
     await setProjectArchived(admin, projectId, true);
     await expectAppError(confirmImport(requester, payload), "CONFLICT");
+    expect(await db.purchaseRequest.count()).toBe(0);
     expect(todayInTbilisi()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

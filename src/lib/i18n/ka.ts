@@ -81,6 +81,8 @@ export const errors = {
   receiptItemForeign: "პოზიცია ამ შეკვეთას არ ეკუთვნის.",
   overReceipt: "მიღებული რაოდენობა აჭარბებს შეკვეთილს.",
   receiptDateFuture: "მიღების თარიღი მომავალშია.",
+  receiptBeforeOrder: "მიღების თარიღი შეკვეთის გაფორმებამდეა.",
+  controlCharacters: "ტექსტი შეიცავს დაუშვებელ სიმბოლოს.",
   correctionSame: "ახალი რაოდენობა ემთხვევა მიმდინარეს.",
   correctionNegative: "შესწორების შემდეგ მიღებული რაოდენობა უარყოფითი გახდება.",
   importRepeat:

@@ -36,6 +36,11 @@ export async function requireProjectAccess(
   projectId: string,
   opts: { requiredRoles?: ProjectRole[]; write?: boolean } = {},
 ): Promise<ProjectAccess> {
+  // Writers share-lock the project row: archiving (an UPDATE) waits for them, and a writer that
+  // starts after an archive commits sees ARCHIVED. Outside a transaction this is a no-op.
+  if (opts.write) {
+    await client.$queryRaw`SELECT 1 AS ok FROM "Project" WHERE "id" = ${projectId} FOR SHARE`;
+  }
   const project = await client.project.findUnique({
     where: { id: projectId },
     select: {

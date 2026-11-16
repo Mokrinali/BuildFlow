@@ -7,7 +7,10 @@ import { errors } from "@/lib/i18n/ka";
 import { assertAdmin, type Actor } from "@/server/access";
 import { recordEvent } from "@/server/audit";
 import { AppError, isUniqueViolation, notFound } from "@/server/errors";
+import { consumeRateLimit } from "@/server/rate-limit";
 import { parseInput } from "@/server/validation";
+
+export const PASSWORD_CHANGE_LIMIT_PER_MINUTE = 5;
 
 const passwordSchema = z
   .string()
@@ -165,6 +168,8 @@ export async function resetPassword(actor: Actor, userId: string, rawPassword: u
 /** The signed-in user changes their own password. Other sessions are ended. */
 export async function changeOwnPassword(actor: Actor, currentSessionId: string, raw: unknown) {
   const input = parseInput(changePasswordInput, raw);
+  // A stolen session must not be able to guess the current password at speed.
+  await consumeRateLimit(`pwd-change:${actor.userId}`, PASSWORD_CHANGE_LIMIT_PER_MINUTE);
   const account = await db.account.findFirst({
     where: { userId: actor.userId, providerId: "credential" },
     select: { id: true, password: true },

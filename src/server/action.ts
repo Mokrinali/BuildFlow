@@ -24,12 +24,22 @@ export async function runAction(fn: () => Promise<string | void>): Promise<Actio
   }
 }
 
+/**
+ * Stack frames of an error without its message. A message can span several lines (Prisma errors
+ * do) and contain user data such as imported item names, which must not reach the logs.
+ */
+export function stackFrames(e: Error): string {
+  return (e.stack ?? "")
+    .split("\n")
+    .filter((l) => /^\s+at /.test(l))
+    .join("\n");
+}
+
 /** Log error type, code and stack frames, but not the message (it can contain user data). */
 function logUnexpected(e: unknown) {
   if (e instanceof Error) {
     const code = "code" in e ? String(e.code) : undefined;
-    const frames = e.stack?.split("\n").slice(1).join("\n");
-    console.error(`action failed: ${e.name}${code ? ` (${code})` : ""}\n${frames ?? ""}`);
+    console.error(`action failed: ${e.name}${code ? ` (${code})` : ""}\n${stackFrames(e)}`);
   } else {
     console.error("action failed: non-Error thrown");
   }

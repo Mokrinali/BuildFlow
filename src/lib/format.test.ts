@@ -48,3 +48,13 @@ describe("code review findings: display", () => {
     expect(eventLabel("something.unknown")).toBe("ცვლილება");
   });
 });
+
+describe("logging without user data", () => {
+  it("keeps only stack frames, never message lines", async () => {
+    const { stackFrames } = await import("@/server/action");
+    const frames = stackFrames(new Error("first line\nსაიდუმლო ცემენტი 25 ტომარა\nmore"));
+    expect(frames).toMatch(/^\s+at /);
+    expect(frames).not.toContain("საიდუმლო");
+    expect(frames).not.toContain("first line");
+  });
+});

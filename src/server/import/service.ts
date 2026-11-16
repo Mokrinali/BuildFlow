@@ -1,7 +1,7 @@
 // WhatsApp text import: preview (parse, no writes) and confirm (create a draft).
 // Privacy (CLAUDE.md): the pasted text is never logged or stored. The database keeps the
 // confirmed items, a SHA-256 hash of the canonical text, counts, and item → line numbers.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { todayInTbilisi } from "@/lib/format";
@@ -35,6 +35,37 @@ const previewInput = z.object({
     )
     .refine((t) => t.trim().length > 0, "ჩასვით შეტყობინების ტექსტი."),
 });
+
+/**
+ * The preview's metadata (hash, counts, key) travels through the browser. A signature binds it to
+ * this user and project, so a client cannot store a fake hash or fake counts.
+ */
+type TokenFields = {
+  userId: string;
+  projectId: string;
+  idempotencyKey: string;
+  textHash: string;
+  stats: { lineCount: number; skippedLineCount: number; flaggedItemCount: number };
+};
+function signPreview(f: TokenFields): string {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret) throw new Error("BETTER_AUTH_SECRET is not set");
+  const payload = JSON.stringify([
+    f.userId,
+    f.projectId,
+    f.idempotencyKey,
+    f.textHash,
+    f.stats.lineCount,
+    f.stats.skippedLineCount,
+    f.stats.flaggedItemCount,
+  ]);
+  return createHmac("sha256", secret).update(`import-preview\n${payload}`).digest("hex");
+}
+function previewSignatureValid(f: TokenFields, token: string): boolean {
+  const expected = Buffer.from(signPreview(f), "hex");
+  const given = Buffer.from(token, "hex");
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
 
 const hashOf = (text: string) =>
   createHash("sha256").update(canonicalForHash(text), "utf8").digest("hex");
@@ -73,12 +104,26 @@ export async function previewImport(actor: Actor, raw: unknown) {
     },
   });
 
+  const idempotencyKey = randomUUID();
+  const stats = {
+    lineCount,
+    skippedLineCount: parsed.lines.filter((l) => l.kind === "skipped").length,
+    itemCount: items.length,
+    flaggedItemCount: items.filter((i) => i.flags.length > 0).length,
+  };
   return {
     projectId: input.projectId,
     lines: parsed.lines,
     desiredDate: parsed.desiredDate,
     textHash,
-    idempotencyKey: randomUUID(),
+    idempotencyKey,
+    token: signPreview({
+      userId: actor.userId,
+      projectId: input.projectId,
+      idempotencyKey,
+      textHash,
+      stats,
+    }),
     duplicateOf: previous
       ? {
           requestId: previous.request.id,
@@ -87,12 +132,7 @@ export async function previewImport(actor: Actor, raw: unknown) {
           by: previous.user.name,
         }
       : null,
-    stats: {
-      lineCount,
-      skippedLineCount: parsed.lines.filter((l) => l.kind === "skipped").length,
-      itemCount: items.length,
-      flaggedItemCount: items.filter((i) => i.flags.length > 0).length,
-    },
+    stats,
   };
 }
 
@@ -103,6 +143,7 @@ const count = z.number().int().min(0).max(MAX_LINES);
 export const confirmImportInput = createRequestInput.extend({
   idempotencyKey: z.uuid(),
   textHash: z.string().regex(/^[0-9a-f]{64}$/),
+  token: z.string().regex(/^[0-9a-f]{64}$/),
   allowRepeat: z.boolean().default(false),
   items: z
     .array(itemInput.extend({ lineNo: z.number().int().min(1).max(MAX_LINES).nullable() }))
@@ -119,29 +160,43 @@ export async function confirmImport(actor: Actor, raw: unknown) {
   const input = parseInput(confirmImportInput, raw);
   await consumeRateLimit(`import-confirm:${actor.userId}`, CONFIRM_LIMIT_PER_MINUTE);
 
+  const signed = previewSignatureValid(
+    {
+      userId: actor.userId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+      textHash: input.textHash,
+      stats: input.stats,
+    },
+    input.token,
+  );
+  if (!signed) throw new AppError("VALIDATION", errors.invalidInput);
+
   const replay = await findByKey(actor, input.idempotencyKey);
   if (replay) return replay;
 
-  if (!input.allowRepeat) {
-    const previous = await db.requestImport.findFirst({
-      where: {
-        organizationId: actor.organizationId,
-        projectId: input.projectId,
-        textHash: input.textHash,
-      },
-      select: { id: true },
-    });
-    if (previous) {
-      // A parallel submit of this same preview may have committed since the first key lookup:
-      // that is a replay, not a repeated text.
-      const winner = await findByKey(actor, input.idempotencyKey);
-      if (winner) return winner;
-      throw new AppError("CONFLICT", errors.importRepeat, { allowRepeat: errors.importRepeat });
-    }
-  }
-
   try {
     return await db.$transaction(async (tx) => {
+      // One confirm at a time per project and text: the repeat check below sees every
+      // committed import of this text, also one confirmed in parallel from another preview.
+      const lockKey = `${input.projectId}:${input.textHash}`;
+      await tx.$queryRaw`SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))) AS l`;
+      const previous = await tx.requestImport.findFirst({
+        where: {
+          organizationId: actor.organizationId,
+          projectId: input.projectId,
+          textHash: input.textHash,
+        },
+        orderBy: { createdAt: "desc" },
+        select: { idempotencyKey: true },
+      });
+      if (previous?.idempotencyKey === input.idempotencyKey) {
+        // This same preview was confirmed in parallel and committed first: a replay.
+        return (await findByKey(actor, input.idempotencyKey))!;
+      }
+      if (previous && !input.allowRepeat) {
+        throw new AppError("CONFLICT", errors.importRepeat, { allowRepeat: errors.importRepeat });
+      }
       const request = await insertDraft(
         tx,
         actor,

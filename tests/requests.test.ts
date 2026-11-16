@@ -214,6 +214,17 @@ describe("validation", () => {
     expect(r.number).toBeGreaterThan(0);
   });
 
+  it("rejects NUL characters with a Georgian message instead of a database error", async () => {
+    const err = await expectAppError(
+      createRequest(
+        requester,
+        newRequest({ items: [{ name: "ცემ\u0000ენტი", quantity: "1", unit: "ტომარა" }] }),
+      ),
+      "VALIDATION",
+    );
+    expect(err.message).toMatch(/სიმბოლო/);
+  });
+
   it("caps the number of items", async () => {
     const many = Array.from({ length: 201 }, (_, i) => ({
       name: `p${i}`,
