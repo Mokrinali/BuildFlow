@@ -2,6 +2,7 @@
 
 import { useActionState, useId } from "react";
 import { Button, Card, FormMessage } from "@/components/ui";
+import { submitKeepingValues } from "@/components/keep-values";
 import type { ActionState } from "@/server/action-state";
 import { initialActionState } from "@/server/action-state";
 import type { RequestPermissions } from "@/server/requests/service";
@@ -72,7 +73,11 @@ function ReasonAction({
   return (
     <details className="rounded-md border border-line p-3">
       <summary className="cursor-pointer text-sm font-semibold">{label}</summary>
-      <form action={formAction} className="mt-3 flex flex-col gap-2">
+      <form
+        action={formAction}
+        onSubmit={submitKeepingValues(formAction)}
+        className="mt-3 flex flex-col gap-2"
+      >
         <input type="hidden" name="requestId" value={requestId} />
         {submittedAt !== undefined && (
           <input type="hidden" name="submittedAt" value={submittedAt} />

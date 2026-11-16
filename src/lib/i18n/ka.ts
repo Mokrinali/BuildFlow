@@ -151,4 +151,13 @@ export const orderEventLabel: Record<string, string> = {
   "order.cancelled": "შეკვეთა გაუქმდა",
   "receipt.created": "მიწოდება დაფიქსირდა",
   "receipt.corrected": "მიღება შესწორდა",
+  "supplier.created": "მომწოდებელი დაემატა",
 };
+
+/**
+ * Georgian label for an audit action. `extra` adds page-specific labels (e.g. projects).
+ * An unknown action shows a neutral Georgian word, never the raw English key.
+ */
+export function eventLabel(action: string, extra: Record<string, string> = {}): string {
+  return extra[action] ?? requestEventLabel[action] ?? orderEventLabel[action] ?? "ცვლილება";
+}

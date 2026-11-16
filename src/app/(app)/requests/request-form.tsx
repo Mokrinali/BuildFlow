@@ -89,8 +89,15 @@ export function RequestForm({
     setRows((rs) => [...rs, emptyRow(nextKey)]);
     setNextKey((k) => k + 1);
   };
-  const removeRow = (i: number) =>
-    setRows((rs) => (rs.length === 1 ? [emptyRow(nextKey)] : rs.filter((_, j) => j !== i)));
+  const removeRow = (i: number) => {
+    if (rows.length === 1) {
+      // Clearing the only row gives it a fresh key, so it never collides with a later row.
+      setRows([emptyRow(nextKey)]);
+      setNextKey((k) => k + 1);
+    } else {
+      setRows((rs) => rs.filter((_, j) => j !== i));
+    }
+  };
 
   const fe = state.fieldErrors ?? {};
 

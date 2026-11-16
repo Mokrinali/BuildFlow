@@ -206,7 +206,12 @@ async function existingSupplier(tx: Tx, actor: Actor, supplierId: string) {
 /** Suppliers are unique by name within the organization; reuse an existing one. */
 async function findOrCreateSupplier(tx: Tx, actor: Actor, name: string) {
   const existing = await tx.supplier.findFirst({
-    where: { organizationId: actor.organizationId, name: { equals: name, mode: "insensitive" } },
+    // Case-insensitive "equals" compiles to ILIKE: escape its wildcards so "A_B" matches only
+    // "A_B" (and not "AXB").
+    where: {
+      organizationId: actor.organizationId,
+      name: { equals: name.replace(/[\\%_]/g, "\\$&"), mode: "insensitive" },
+    },
     select: { id: true },
   });
   if (existing) return existing.id;

@@ -7,10 +7,11 @@ import {
   formatDateTime,
   formatMoney,
   formatQuantity,
+  formatUnitPrice,
   formatWorkDate,
   todayInTbilisi,
 } from "@/lib/format";
-import { currencyLabel, orderEventLabel } from "@/lib/i18n/ka";
+import { currencyLabel, eventLabel } from "@/lib/i18n/ka";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import { AppError } from "@/server/errors";
 import { getOrder } from "@/server/orders/service";
@@ -132,7 +133,7 @@ export default async function OrderPage({ params, searchParams }: Props) {
                       <td className="py-2 pr-3 text-right">{formatQuantity(it.received)}</td>
                       <td className="py-2 pr-3 text-right">{formatQuantity(it.remaining)}</td>
                       <td className="py-2 pr-3 text-right whitespace-nowrap">
-                        {money(it.unitPrice)}
+                        {formatUnitPrice(it.unitPrice, order.currency)}
                       </td>
                       <td className="py-2 text-right whitespace-nowrap">{money(it.total)}</td>
                     </tr>
@@ -165,7 +166,7 @@ export default async function OrderPage({ params, searchParams }: Props) {
                     <dt className="text-steel-600">დარჩენილი</dt>
                     <dd className="text-right">{formatQuantity(it.remaining)}</dd>
                     <dt className="text-steel-600">ფასი</dt>
-                    <dd className="text-right">{money(it.unitPrice)}</dd>
+                    <dd className="text-right">{formatUnitPrice(it.unitPrice, order.currency)}</dd>
                     <dt className="text-steel-600">თანხა</dt>
                     <dd className="text-right">{money(it.total)}</dd>
                   </dl>
@@ -238,7 +239,7 @@ export default async function OrderPage({ params, searchParams }: Props) {
             <ol className="flex flex-col gap-3 text-sm">
               {events.map((e) => (
                 <li key={e.id}>
-                  <p>{orderEventLabel[e.action] ?? e.action}</p>
+                  <p>{eventLabel(e.action)}</p>
                   {e.reason && <p className="text-steel-600">„{e.reason}“</p>}
                   <p className="text-xs text-steel-600">
                     {formatDateTime(e.createdAt)} · {e.actor?.name ?? "სისტემა"}

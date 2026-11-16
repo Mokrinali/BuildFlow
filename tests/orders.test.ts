@@ -258,6 +258,25 @@ describe("orders", () => {
     expect(a.supplierId).toBe(b.supplierId);
   });
 
+  it("treats % and _ in a new supplier name literally", async () => {
+    const r = await approvedRequest();
+    // "შპს ბეტონი" exists; "შპს %" and "შპს ბ_ტონი" must not match it.
+    for (const supplierName of ["შპს %", "შპს ბ_ტონი"]) {
+      const o = await createOrder(
+        buyer,
+        orderInput(r.id, [{ requestItemId: r.cement, quantity: "1" }], {
+          supplierId: "",
+          supplierName,
+        }),
+      );
+      const order = await db.purchaseOrder.findUniqueOrThrow({
+        where: { id: o.id },
+        include: { supplier: true },
+      });
+      expect(order.supplier.name).toBe(supplierName);
+    }
+  });
+
   it("only orders approved requests", async () => {
     const r = await createRequest(requester, {
       projectId,

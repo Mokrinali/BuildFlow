@@ -26,7 +26,13 @@ const previewInput = z.object({
   projectId: z.string().min(1, "აირჩიეთ პროექტი.").max(64),
   text: z
     .string()
-    .max(MAX_TEXT_LENGTH, `ტექსტი ძალიან გრძელია (მაქსიმუმ ${MAX_TEXT_LENGTH} სიმბოლო).`)
+    // Browsers submit textarea line breaks as CRLF; count them as one character, like the form.
+    .transform((t) => t.replace(/\r\n?/g, "\n"))
+    .pipe(
+      z
+        .string()
+        .max(MAX_TEXT_LENGTH, `ტექსტი ძალიან გრძელია (მაქსიმუმ ${MAX_TEXT_LENGTH} სიმბოლო).`),
+    )
     .refine((t) => t.trim().length > 0, "ჩასვით შეტყობინების ტექსტი."),
 });
 

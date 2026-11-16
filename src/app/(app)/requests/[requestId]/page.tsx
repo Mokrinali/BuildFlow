@@ -4,13 +4,7 @@ import { notFound } from "next/navigation";
 import { RequestStatusBadge } from "@/components/request-status";
 import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import { formatDateTime, formatMoney, formatQuantity, formatWorkDate } from "@/lib/format";
-import {
-  orderEventLabel,
-  orderStatusLabel,
-  priorityLabel,
-  requestEventLabel,
-  requestStatusLabel,
-} from "@/lib/i18n/ka";
+import { eventLabel, orderStatusLabel, priorityLabel, requestStatusLabel } from "@/lib/i18n/ka";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import type { RequestStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/server/errors";
@@ -283,9 +277,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
               {events.map((e) => (
                 <li key={e.id}>
                   <p>
-                    {e.entityType === "PurchaseOrder"
-                      ? (orderEventLabel[e.action] ?? e.action)
-                      : (requestEventLabel[e.action] ?? e.action)}
+                    {eventLabel(e.action)}
                     {e.action === "request.status_changed" && statusTo(e.changes) && (
                       <>
                         : <strong>{requestStatusLabel[statusTo(e.changes)!]}</strong>

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatDateTime, formatMoney, formatWorkDate, todayInTbilisi } from "./format";
+import {
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatUnitPrice,
+  formatWorkDate,
+  todayInTbilisi,
+} from "./format";
+import { eventLabel } from "./i18n/ka";
 
 describe("ka-GE formatting", () => {
   it("shows timestamps in Tbilisi time (UTC+4)", () => {
@@ -22,5 +30,21 @@ describe("ka-GE formatting", () => {
   it("formats GEL amounts", () => {
     const s = formatMoney("1234.5", "GEL");
     expect(s).toMatch(/1\s?234,50/);
+  });
+});
+
+describe("code review findings: display", () => {
+  it("shows unit prices with up to 4 decimals", () => {
+    expect(formatUnitPrice("0.0375", "GEL")).toContain("0,0375");
+    expect(formatUnitPrice("18.5", "GEL")).toContain("18,50");
+  });
+
+  it("labels every audit action in Georgian, never with the raw key", () => {
+    expect(eventLabel("order.created")).toBe("შეკვეთა გაფორმდა");
+    expect(eventLabel("request.approved")).toBe("დამტკიცდა");
+    expect(eventLabel("project.created", { "project.created": "პროექტი შეიქმნა" })).toBe(
+      "პროექტი შეიქმნა",
+    );
+    expect(eventLabel("something.unknown")).toBe("ცვლილება");
   });
 });

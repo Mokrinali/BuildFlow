@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Button, Field, FormMessage } from "@/components/ui";
+import { submitKeepingValues } from "@/components/keep-values";
 import { initialActionState } from "@/server/action-state";
 import { createProjectAction, updateProjectAction } from "./actions";
 
@@ -14,7 +15,11 @@ export function ProjectForm({
   const [state, formAction, pending] = useActionState(action, initialActionState);
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form
+      action={formAction}
+      onSubmit={submitKeepingValues(formAction)}
+      className="flex flex-col gap-4"
+    >
       {project && <input type="hidden" name="projectId" value={project.id} />}
       <Field
         label="სახელი"

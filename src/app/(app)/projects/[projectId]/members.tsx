@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Badge, Button, FormMessage } from "@/components/ui";
+import { submitKeepingValues } from "@/components/keep-values";
 import type { ProjectRole } from "@/generated/prisma/enums";
 import { projectRoleLabel } from "@/lib/i18n/ka";
 import { initialActionState } from "@/server/action-state";
@@ -126,7 +127,7 @@ export function AddMemberForm({
 }) {
   const [state, action, pending] = useActionState(addMemberAction, initialActionState);
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form action={action} onSubmit={submitKeepingValues(action)} className="flex flex-col gap-3">
       <input type="hidden" name="projectId" value={projectId} />
       <div className="flex flex-col gap-1">
         <label htmlFor="add-member-user" className="text-sm font-medium">

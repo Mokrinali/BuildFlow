@@ -64,6 +64,16 @@ export function formatMoney(amount: string | number, currency: string): string {
   return new Intl.NumberFormat(LOCALE, { style: "currency", currency }).format(Number(amount));
 }
 
+/** Unit prices are stored with up to 4 decimals; show them all (at least 2). */
+export function formatUnitPrice(amount: string | number, currency: string): string {
+  return new Intl.NumberFormat(LOCALE, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(Number(amount));
+}
+
 export function formatQuantity(q: string | number): string {
   return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 3 }).format(Number(q));
 }

@@ -166,7 +166,20 @@ function inferYear(today: string, m: number, d: number): string | null {
   return v < today ? iso(y + 1, m, d) : v;
 }
 
-function findDates(text: string, today: string): DateHit[] {
+/**
+ * The day a WhatsApp message was written, from its header ("[15.11.26, 18:02]" or
+ * "15/11/2026, 18:02 - "). Day first, as in Georgian exports; month first only when the first
+ * number cannot be a month.
+ */
+function messageDay(line: string): string | null {
+  const m = /^\[?(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4}),?\s+\d{1,2}:\d{2}/u.exec(line);
+  if (!m) return null;
+  const year = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return b > 12 ? iso(year, a, b) : iso(year, b, a);
+}
+
+function findDates(text: string, today: string, base: string = today): DateHit[] {
   const hits: DateHit[] = [];
   const add = (m: RegExpExecArray, value: string | null, uncertain = false) => {
     if (value) hits.push({ start: m.index, end: m.index + m[0].length, value, uncertain });
@@ -204,20 +217,24 @@ function findDates(text: string, today: string): DateHit[] {
     // Read as a date only because of a keyword on the line: the user must confirm it.
     add(m, inferYear(today, Number(m[2]), Number(m[1])), !m[3]);
   }
-  // Relative words.
+  // Relative words count from the day the message was written (its WhatsApp header), which can
+  // differ from the import day: then the result is uncertain. Only real case endings are allowed,
+  // so "დღესასწაული" or "ზეგანი" are not dates.
   const relative: [RegExp, number][] = [
-    [/(?<!\p{L})დღეს\p{L}*/gu, 0],
-    [/(?<!\p{L})ხვალ\p{L}*/gu, 1],
-    [/(?<!\p{L})ზეგ\p{L}*/gu, 2],
+    [/(?<!\p{L})დღეს(?:ვე)?(?!\p{L})/gu, 0],
+    [/(?<!\p{L})ხვალ(?:ვე|ისთვის|ამდე|იდან|ინდელ\p{L}*)?(?!\p{L})/gu, 1],
+    [/(?<!\p{L})ზეგ(?:ისთვის|ამდე)?(?!\p{L})/gu, 2],
   ];
-  for (const [re, n] of relative) while ((m = re.exec(text))) add(m, addDays(today, n));
+  for (const [re, n] of relative) {
+    while ((m = re.exec(text))) add(m, addDays(base, n), base !== today);
+  }
   // Weekdays: the next such day, but always uncertain ("კვირა" also means "week").
   const weekday = new RegExp(String.raw`(?<!\p{L})(${WEEKDAYS.join("|")})\p{L}*`, "gu");
-  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const dow = new Date(`${base}T00:00:00Z`).getUTCDay();
   while ((m = weekday.exec(text))) {
     // "ორშაბათ" etc. contain "შაბათ": the alternation order prefers the longer names.
     const target = WEEKDAYS.indexOf(m[1]!);
-    add(m, addDays(today, (target - dow + 7) % 7 || 7), true);
+    add(m, addDays(base, (target - dow + 7) % 7 || 7), true);
   }
   return hits.sort((a, b) => a.start - b.start);
 }
@@ -537,6 +554,8 @@ export function parseMaterialText(input: string, today: string): ParseResult {
 
   const lines: ParsedLine[] = [];
   const dates: { value: string; lineNo: number; uncertain: boolean }[] = [];
+  // Lines without a header continue the previous message, so they keep its day.
+  let base = today;
 
   rawLines.forEach((raw, i) => {
     const lineNo = i + 1;
@@ -556,6 +575,7 @@ export function parseMaterialText(input: string, today: string): ParseResult {
       });
       return;
     }
+    base = messageDay(text) ?? base;
     let body = toMkhedruli(text).replace(WHATSAPP_HEADER, "").replace(EMOJI, " ");
     body = body.replace(BULLET, "").trim();
     if (!body) {
@@ -563,7 +583,7 @@ export function parseMaterialText(input: string, today: string): ParseResult {
       return;
     }
 
-    const dateHits = findDates(body, today);
+    const dateHits = findDates(body, today, base);
     for (const d of dateHits) dates.push({ value: d.value, lineNo, uncertain: d.uncertain });
     const noise = collect(body, noisePatterns(body));
     const cleaned = blank(blank(body, dateHits), noise);

@@ -42,19 +42,71 @@ export function ImportFlow({
   const preview = state.preview;
   const fe = state.fieldErrors ?? {};
 
-  if (preview && !editing) {
-    return (
-      <ImportReview
-        // A new preview (new idempotency key) starts a fresh review.
-        key={preview.idempotencyKey}
-        preview={preview}
-        projectName={projects.find((p) => p.id === preview.projectId)?.name ?? ""}
-        today={today}
-        onBack={() => setEditing(true)}
-      />
-    );
-  }
+  // No maxLength on the textarea: browsers silently cut a longer paste. Show the limit instead.
+  const tooLong = text.length > MAX_TEXT;
 
+  return (
+    <>
+      {preview && (
+        // Stays mounted while the text is shown again, so review edits are not lost.
+        // A new preview (new idempotency key) starts a fresh review.
+        <div hidden={editing}>
+          <ImportReview
+            key={preview.idempotencyKey}
+            preview={preview}
+            projectName={projects.find((p) => p.id === preview.projectId)?.name ?? ""}
+            today={today}
+            onBack={() => setEditing(true)}
+          />
+        </div>
+      )}
+      {(editing || !preview) && (
+        <TextStep
+          uid={uid}
+          action={action}
+          pending={pending}
+          state={state}
+          projects={projects}
+          projectId={projectId}
+          setProjectId={setProjectId}
+          text={text}
+          setText={setText}
+          tooLong={tooLong}
+          fe={fe}
+          onShowPreview={preview ? () => setEditing(false) : undefined}
+        />
+      )}
+    </>
+  );
+}
+
+function TextStep({
+  uid,
+  action,
+  pending,
+  state,
+  projects,
+  projectId,
+  setProjectId,
+  text,
+  setText,
+  tooLong,
+  fe,
+  onShowPreview,
+}: {
+  uid: string;
+  action: (form: FormData) => void;
+  pending: boolean;
+  state: PreviewState;
+  projects: { id: string; name: string }[];
+  projectId: string;
+  setProjectId: (v: string) => void;
+  text: string;
+  setText: (v: string) => void;
+  tooLong: boolean;
+  fe: Record<string, string>;
+  onShowPreview?: () => void;
+}) {
   return (
     <form
       action={action}
@@ -94,25 +146,34 @@ export function ImportFlow({
           rows={12}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          maxLength={MAX_TEXT}
           required
           placeholder={"მაგალითად:\nცემენტი 25 ტომარა\n12 ც. არმატურა Ø12\nმიწოდება ხვალ"}
-          aria-invalid={fe.text ? true : undefined}
-          aria-describedby={`${uid}-count`}
+          aria-invalid={fe.text || tooLong ? true : undefined}
+          aria-describedby={`${uid}-count${fe.text ? ` ${uid}-text-err` : ""}`}
           className="rounded-md border border-steel bg-white px-3 py-2 font-mono text-sm text-navy aria-invalid:border-red-700"
         />
-        <p id={`${uid}-count`} className="text-xs text-steel-600">
+        <p
+          id={`${uid}-count`}
+          className={`text-xs ${tooLong ? "font-semibold text-red-800" : "text-steel-600"}`}
+          aria-live="polite"
+        >
           {text.length} / {MAX_TEXT} სიმბოლო
+          {tooLong &&
+            ` · ტექსტი ძალიან გრძელია, ზედმეტია ${text.length - MAX_TEXT} სიმბოლო. გაყავით ნაწილებად.`}
         </p>
-        {fe.text && <p className="text-sm text-red-800">{fe.text}</p>}
+        {fe.text && (
+          <p id={`${uid}-text-err`} className="text-sm text-red-800">
+            {fe.text}
+          </p>
+        )}
       </div>
       {!state.ok && <FormMessage ok={false} message={state.message} />}
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending || !text.trim()}>
+        <Button type="submit" disabled={pending || !text.trim() || tooLong}>
           {pending ? "მუშავდება…" : "გადახედვა"}
         </Button>
-        {preview && (
-          <Button type="button" variant="secondary" onClick={() => setEditing(false)}>
+        {onShowPreview && (
+          <Button type="button" variant="secondary" onClick={onShowPreview}>
             წინა გადახედვაზე დაბრუნება
           </Button>
         )}

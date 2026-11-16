@@ -2,6 +2,7 @@
 
 import { useActionState, useId, useMemo, useState } from "react";
 import { Button, Card, FormMessage } from "@/components/ui";
+import { submitKeepingValues } from "@/components/keep-values";
 import { formatQuantity } from "@/lib/format";
 import { initialActionState } from "@/server/action-state";
 import { cancelOrderAction, correctReceiptAction, createReceiptAction } from "../actions";
@@ -164,7 +165,11 @@ export function CancelOrderForm({ orderId }: { orderId: string }) {
   return (
     <details className="rounded-md border border-line bg-white p-3">
       <summary className="cursor-pointer text-sm font-semibold">შეკვეთის გაუქმება</summary>
-      <form action={action} className="mt-3 flex flex-col gap-2">
+      <form
+        action={action}
+        onSubmit={submitKeepingValues(action)}
+        className="mt-3 flex flex-col gap-2"
+      >
         <input type="hidden" name="orderId" value={orderId} />
         <label htmlFor={id} className="text-sm font-medium">
           გაუქმების მიზეზი
@@ -209,7 +214,11 @@ export function CorrectReceiptForm({
   return (
     <details className="mt-1">
       <summary className="cursor-pointer text-xs underline underline-offset-4">შესწორება</summary>
-      <form action={action} className="mt-2 flex flex-col gap-2 rounded-md bg-offwhite p-3">
+      <form
+        action={action}
+        onSubmit={submitKeepingValues(action)}
+        className="mt-2 flex flex-col gap-2 rounded-md bg-offwhite p-3"
+      >
         <input type="hidden" name="orderId" value={orderId} />
         <input type="hidden" name="receiptItemId" value={receiptItemId} />
         <label htmlFor={`${id}-q`} className="text-xs font-medium">

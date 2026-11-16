@@ -4,7 +4,7 @@ import { Badge, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui
 import type { ProjectRole } from "@/generated/prisma/enums";
 import { db } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
-import { projectRoleLabel, projectStatusLabel, requestEventLabel } from "@/lib/i18n/ka";
+import { eventLabel, projectRoleLabel, projectStatusLabel } from "@/lib/i18n/ka";
 import { AppError } from "@/server/errors";
 import { getProject } from "@/server/projects/service";
 import { requireUser } from "@/server/session";
@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "პროექტი" };
 
 type Props = { params: Promise<{ projectId: string }> };
 
-const eventLabel: Record<string, string> = {
+const projectEventLabel: Record<string, string> = {
   "project.created": "პროექტი შეიქმნა",
   "project.updated": "პროექტის მონაცემები შეიცვალა",
   "project.archived": "პროექტი არქივირდა",
@@ -135,7 +135,7 @@ export default async function ProjectPage({ params }: Props) {
               <ol className="flex flex-col gap-3 text-sm">
                 {events.map((e) => (
                   <li key={e.id}>
-                    <p>{eventLabel[e.action] ?? requestEventLabel[e.action] ?? e.action}</p>
+                    <p>{eventLabel(e.action, projectEventLabel)}</p>
                     <p className="text-xs text-steel-600">
                       {formatDateTime(e.createdAt)} · {e.actor?.name ?? "სისტემა"}
                     </p>

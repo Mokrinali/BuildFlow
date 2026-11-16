@@ -286,6 +286,30 @@ describe("code review findings: no confident wrong quantities", () => {
   });
 });
 
+describe("code review findings: relative dates", () => {
+  it("counts 'tomorrow' from the day the message was written and flags it", () => {
+    const r = parse("[15.11.26, 18:02:11] ლევანი: ხვალ დილით ცემენტი 30 ტომარა");
+    expect(r.desiredDate).toMatchObject({ value: "2026-11-16", flags: ["uncertain"] });
+    // Continuation lines keep the message day.
+    const multi = parse("[14.11.26, 09:00] ლევანი: საჭიროა:\nქვიშა 3 კუბი\nზეგ მოიტანეთ");
+    expect(multi.desiredDate?.value).toBe("2026-11-16");
+    // A message written today is not uncertain.
+    expect(parse("[16.11.26, 09:00] ლევანი: ხვალ").desiredDate).toMatchObject({
+      value: "2026-11-17",
+      flags: [],
+    });
+  });
+
+  it("does not read words that only start like 'today' or 'day after tomorrow'", () => {
+    expect(parse("დღესასწაულამდე 5 ტომარა ცემენტი").desiredDate).toBeNull();
+    const r = parse("ზეგანი 5 ცალი");
+    expect(r.desiredDate).toBeNull();
+    expect(itemsOf("ზეგანი 5 ცალი")[0]?.name).toBe("ზეგანი");
+    expect(parse("ხვალისთვის").desiredDate?.value).toBe("2026-11-17");
+    expect(parse("დღესვე მოიტანეთ").desiredDate?.value).toBe("2026-11-16");
+  });
+});
+
 describe("delivery date", () => {
   it.each([
     ["ხვალ მოიტანეთ", "2026-11-17", []],

@@ -2,13 +2,14 @@
 
 import { useActionState } from "react";
 import { Button, Field, FormMessage } from "@/components/ui";
+import { submitKeepingValues } from "@/components/keep-values";
 import { initialActionState } from "@/server/action-state";
 import { changePasswordAction } from "./actions";
 
 export function PasswordForm() {
   const [state, action, pending] = useActionState(changePasswordAction, initialActionState);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={action} onSubmit={submitKeepingValues(action)} className="flex flex-col gap-4">
       <Field
         label="მიმდინარე პაროლი"
         name="currentPassword"
