@@ -18,11 +18,18 @@ type Props = {
   searchParams: Promise<{ notice?: string }>;
 };
 
-const notices: Record<string, { ok: boolean; text: string }> = {
-  saved: { ok: true, text: "მონახაზი შენახულია." },
-  submitted: { ok: true, text: "მოთხოვნა შენახულია და გაიგზავნა განსახილველად." },
+// Each notice comes from a redirect after saving. It is shown only while the request is still in
+// the status the save produced, so a later approve/reject on the same URL does not leave it stale.
+const notices: Record<string, { ok: boolean; text: string; status: string }> = {
+  saved: { ok: true, text: "მონახაზი შენახულია.", status: "DRAFT" },
+  submitted: {
+    ok: true,
+    text: "მოთხოვნა შენახულია და გაიგზავნა განსახილველად.",
+    status: "IN_REVIEW",
+  },
   "saved-not-submitted": {
     ok: false,
+    status: "DRAFT",
     text: "მონახაზი შენახულია, მაგრამ გაგზავნა ვერ მოხერხდა. შეამოწმეთ პოზიციები და თარიღი.",
   },
 };
@@ -48,7 +55,8 @@ export default async function RequestPage({ params, searchParams }: Props) {
     throw e;
   }
   const { request, items, orders, events, permissions, access } = data;
-  const n = notice ? notices[notice] : undefined;
+  const candidate = notice ? notices[notice] : undefined;
+  const n = candidate?.status === request.status ? candidate : undefined;
 
   return (
     <>
@@ -76,7 +84,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -88,7 +96,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
                 {request.project.name}
               </Link>
             </div>
-            <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Row label="ავტორი">{request.author.name}</Row>
               <Row label="შექმნის დრო">{formatDateTime(request.createdAt)}</Row>
               <Row label="სასურველი მიწოდება">

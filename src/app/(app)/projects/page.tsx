@@ -18,7 +18,7 @@ export default async function ProjectsPage({ searchParams }: Props) {
   return (
     <>
       <PageHeader title="პროექტები" />
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div>
           <div className="mb-3 flex justify-end">
             <Link
@@ -35,7 +35,7 @@ export default async function ProjectsPage({ searchParams }: Props) {
                 : "ადმინისტრატორს სთხოვეთ პროექტში დამატება."}
             </EmptyState>
           ) : (
-            <ul className="grid gap-3">
+            <ul className="grid grid-cols-1 gap-3">
               {projects.map((p) => (
                 <li key={p.id}>
                   <Link

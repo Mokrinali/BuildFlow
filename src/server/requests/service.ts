@@ -286,6 +286,8 @@ export async function returnToDraft(actor: Actor, requestId: string) {
     to: "DRAFT",
     who: "author",
     action: "request.returned_to_draft",
+    // The rejection stays in the audit history; the detail page shows the current review only.
+    data: { reviewedAt: null, reviewedById: null },
   });
 }
 

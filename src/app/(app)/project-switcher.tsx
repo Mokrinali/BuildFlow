@@ -11,7 +11,7 @@ export function ProjectSwitcher({ projects }: { projects: { id: string; name: st
     return <span className="text-sm text-steel-600">პროექტები არ არის</span>;
   }
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <label htmlFor="project-switcher" className="text-sm font-medium">
         პროექტი
       </label>
@@ -19,7 +19,7 @@ export function ProjectSwitcher({ projects }: { projects: { id: string; name: st
         id="project-switcher"
         value={current}
         onChange={(e) => router.push(e.target.value ? `/projects/${e.target.value}` : "/projects")}
-        className="min-h-10 max-w-[14rem] rounded-md border border-steel bg-white px-2 text-sm"
+        className="min-h-10 max-w-[14rem] min-w-0 rounded-md border border-steel bg-white px-2 text-sm"
       >
         <option value="">ყველა პროექტი</option>
         {projects.map((p) => (

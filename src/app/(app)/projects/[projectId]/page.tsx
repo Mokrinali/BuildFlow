@@ -87,7 +87,7 @@ export default async function ProjectPage({ params }: Props) {
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card>
           <h2 className="mb-4 text-lg font-semibold">წევრები</h2>
           {project.memberships.length === 0 ? (

@@ -99,7 +99,7 @@ export function RequestForm({
       <input type="hidden" name="payload" value={payload} />
       {requestId && <input type="hidden" name="requestId" value={requestId} />}
 
-      <section className="grid gap-4 rounded-lg border border-line bg-white p-4 sm:grid-cols-2 sm:p-6">
+      <section className="grid grid-cols-1 gap-4 rounded-lg border border-line bg-white p-4 sm:grid-cols-2 sm:p-6">
         {!requestId && (
           <div className="flex flex-col gap-1 sm:col-span-2">
             <label htmlFor={`${uid}-project`} className="text-sm font-medium">
@@ -227,7 +227,7 @@ export function RequestForm({
                     წაშლა
                   </button>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-[2fr_1.2fr_0.8fr_0.9fr]">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1.2fr_0.8fr_0.9fr]">
                   {field("name", "დასახელება", { maxLength: 200 })}
                   {field("spec", "ზომა / სპეციფიკაცია", { maxLength: 200 })}
                   {field("quantity", "რაოდენობა", { inputMode: "decimal", maxLength: 16 })}

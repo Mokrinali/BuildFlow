@@ -16,7 +16,7 @@ export default async function UsersPage() {
   return (
     <>
       <PageHeader title="მომხმარებლები" />
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card>
           <ul className="divide-y divide-line">
             {users.map((u) => (

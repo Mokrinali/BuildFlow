@@ -35,7 +35,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         </p>
       )}
       <p className="mb-6 text-steel-600">გამარჯობა, {user.name}!</p>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card>
           <h2 className="mb-3 font-semibold">მიმდინარე მოთხოვნები</h2>
           <div className="flex flex-col gap-2">
@@ -83,7 +83,7 @@ export default async function DashboardPage({ searchParams }: Props) {
       {projects.length === 0 ? (
         <EmptyState title="აქტიური პროექტები არ არის" />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {projects.map((p) => (
             <li key={p.id}>
               <Link

@@ -59,7 +59,7 @@ export default async function RequestsPage({ searchParams }: Props) {
       {/* GET form: filters live in the URL, so they survive reloads and can be shared. */}
       <form
         method="get"
-        className="mb-6 grid gap-3 rounded-lg border border-line bg-white p-4 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_0.9fr_0.9fr_auto]"
+        className="mb-6 grid grid-cols-1 gap-3 rounded-lg border border-line bg-white p-4 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_0.9fr_0.9fr_auto]"
         aria-label="მოთხოვნების ფილტრი"
       >
         <div className="flex flex-col gap-1">
