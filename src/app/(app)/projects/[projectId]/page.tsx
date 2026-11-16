@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
+import { Badge, ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import type { ProjectRole } from "@/generated/prisma/enums";
 import { db } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
-import { projectRoleLabel, projectStatusLabel } from "@/lib/i18n/ka";
+import { projectRoleLabel, projectStatusLabel, requestEventLabel } from "@/lib/i18n/ka";
 import { AppError } from "@/server/errors";
 import { getProject } from "@/server/projects/service";
 import { requireUser } from "@/server/session";
@@ -78,6 +78,14 @@ export default async function ProjectPage({ params }: Props) {
           პროექტი არქივირებულია. ისტორია ხელმისაწვდომია მხოლოდ სანახავად.
         </p>
       )}
+      <div className="mb-6 flex flex-wrap gap-3">
+        <ButtonLink href={`/requests?project=${project.id}`} variant="secondary">
+          პროექტის მოთხოვნები
+        </ButtonLink>
+        {!access.archived && (access.isAdmin || access.roles.includes("REQUESTER")) && (
+          <ButtonLink href={`/requests/new?project=${project.id}`}>ახალი მოთხოვნა</ButtonLink>
+        )}
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <Card>
@@ -127,7 +135,7 @@ export default async function ProjectPage({ params }: Props) {
               <ol className="flex flex-col gap-3 text-sm">
                 {events.map((e) => (
                   <li key={e.id}>
-                    <p>{eventLabel[e.action] ?? e.action}</p>
+                    <p>{eventLabel[e.action] ?? requestEventLabel[e.action] ?? e.action}</p>
                     <p className="text-xs text-steel-600">
                       {formatDateTime(e.createdAt)} · {e.actor?.name ?? "სისტემა"}
                     </p>

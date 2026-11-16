@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { parseBool, parseId, runAction, type ActionState } from "@/server/action";
+import { formFlag, formId, runAction, type ActionState } from "@/server/action";
 import {
   addMember,
   createProject,
@@ -13,7 +13,7 @@ import {
 } from "@/server/projects/service";
 import { requireUser } from "@/server/session";
 
-// Bound arguments (ids, flags) come from the client, so every action validates them.
+// Ids and flags arrive as hidden form fields and are validated here (see formId in action.ts).
 const str = (form: FormData, key: string) => String(form.get(key) ?? "");
 const roles = (form: FormData) => form.getAll("roles").map(String);
 
@@ -32,14 +32,10 @@ export async function createProjectAction(_: ActionState, form: FormData): Promi
   redirect(`/projects/${id}`);
 }
 
-export async function updateProjectAction(
-  projectId: string,
-  _: ActionState,
-  form: FormData,
-): Promise<ActionState> {
+export async function updateProjectAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await updateProject(user, parseId(projectId), {
+    await updateProject(user, formId(form, "projectId"), {
       name: str(form, "name"),
       address: str(form, "address"),
     });
@@ -49,58 +45,47 @@ export async function updateProjectAction(
   return state;
 }
 
-export async function setArchivedAction(
-  projectId: string,
-  archived: boolean,
-  _: ActionState,
-): Promise<ActionState> {
+export async function setArchivedAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    const value = parseBool(archived);
-    await setProjectArchived(user, parseId(projectId), value);
-    return value ? "პროექტი არქივირებულია." : "პროექტი აღდგენილია.";
+    const archived = formFlag(form, "archived");
+    await setProjectArchived(user, formId(form, "projectId"), archived);
+    return archived ? "პროექტი არქივირებულია." : "პროექტი აღდგენილია.";
   });
   if (state.ok) revalidatePath("/", "layout");
   return state;
 }
 
-export async function addMemberAction(
-  projectId: string,
-  _: ActionState,
-  form: FormData,
-): Promise<ActionState> {
+export async function addMemberAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
+  let projectId = "";
   const state = await runAction(async () => {
-    await addMember(user, parseId(projectId), { userId: str(form, "userId"), roles: roles(form) });
+    projectId = formId(form, "projectId");
+    await addMember(user, projectId, { userId: str(form, "userId"), roles: roles(form) });
     return "წევრი დამატებულია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);
   return state;
 }
 
-export async function updateMemberAction(
-  projectId: string,
-  membershipId: string,
-  _: ActionState,
-  form: FormData,
-): Promise<ActionState> {
+export async function updateMemberAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
+  let projectId = "";
   const state = await runAction(async () => {
-    await updateMemberRoles(user, parseId(projectId), parseId(membershipId), roles(form));
+    projectId = formId(form, "projectId");
+    await updateMemberRoles(user, projectId, formId(form, "membershipId"), roles(form));
     return "როლები განახლებულია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);
   return state;
 }
 
-export async function removeMemberAction(
-  projectId: string,
-  membershipId: string,
-  _: ActionState,
-): Promise<ActionState> {
+export async function removeMemberAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
+  let projectId = "";
   const state = await runAction(async () => {
-    await removeMember(user, parseId(projectId), parseId(membershipId));
+    projectId = formId(form, "projectId");
+    await removeMember(user, projectId, formId(form, "membershipId"));
     return "წევრი წაშლილია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);

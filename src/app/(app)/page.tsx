@@ -1,22 +1,73 @@
 import Link from "next/link";
+import { RequestStatusBadge } from "@/components/request-status";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
+import { formatWorkDate } from "@/lib/format";
+import { formatRequestNumber } from "@/lib/units";
 import { listProjects } from "@/server/projects/service";
+import { requestDashboard } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
 
-export default async function DashboardPage() {
+type Props = { searchParams: Promise<{ password?: string }> };
+
+function Stat({ href, value, label }: { href: string; value: number; label: string }) {
+  return (
+    <Link href={href} className="flex items-baseline gap-2 rounded-md px-1 hover:bg-offwhite">
+      <span className="text-2xl font-bold">{value}</span>
+      <span className="text-sm underline underline-offset-4">{label}</span>
+    </Link>
+  );
+}
+
+export default async function DashboardPage({ searchParams }: Props) {
   const user = await requireUser();
-  const projects = await listProjects(user);
+  const [projects, dash, { password }] = await Promise.all([
+    listProjects(user),
+    requestDashboard(user),
+    searchParams,
+  ]);
 
   return (
     <>
       <PageHeader title="მიმოხილვა" />
+      {password === "changed" && (
+        <p role="status" className="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-900">
+          პაროლი შეიცვალა.
+        </p>
+      )}
       <p className="mb-6 text-steel-600">გამარჯობა, {user.name}!</p>
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
-          <h2 className="font-semibold">მიმდინარე მოთხოვნები</h2>
-          <p className="mt-2 text-sm text-steel-600">
-            მოთხოვნების მოდული მომდევნო ეტაპზე დაემატება.
-          </p>
+          <h2 className="mb-3 font-semibold">მიმდინარე მოთხოვნები</h2>
+          <div className="flex flex-col gap-2">
+            <Stat
+              href="/requests?status=IN_REVIEW"
+              value={dash.awaitingReview}
+              label="განსახილველი"
+            />
+            <Stat href="/requests" value={dash.open} label="ღია მოთხოვნა" />
+            {dash.myDrafts > 0 && (
+              <Stat href="/requests?status=DRAFT" value={dash.myDrafts} label="ჩემი მონახაზი" />
+            )}
+          </div>
+          {dash.recent.length > 0 && (
+            <ul className="mt-4 flex flex-col gap-2 border-t border-line pt-3 text-sm">
+              {dash.recent.map((r) => (
+                <li key={r.id} className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href={`/requests/${r.id}`}
+                    className="font-semibold underline underline-offset-4"
+                  >
+                    {formatRequestNumber(r.number)}
+                  </Link>
+                  <RequestStatusBadge status={r.status} />
+                  <span className="text-steel-600">
+                    {r.project.name}
+                    {r.desiredDate ? ` · ${formatWorkDate(r.desiredDate)}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
         <Card>
           <h2 className="font-semibold">ვადაგადაცილებული მიწოდებები</h2>

@@ -51,14 +51,8 @@ export function MemberRow({
   /** Admin on an archived project: roles are frozen, but access can still be revoked. */
   removable?: boolean;
 }) {
-  const [updState, updAction, updPending] = useActionState(
-    updateMemberAction.bind(null, projectId, membership.id),
-    initialActionState,
-  );
-  const [rmState, rmAction, rmPending] = useActionState(
-    removeMemberAction.bind(null, projectId, membership.id),
-    initialActionState,
-  );
+  const [updState, updAction, updPending] = useActionState(updateMemberAction, initialActionState);
+  const [rmState, rmAction, rmPending] = useActionState(removeMemberAction, initialActionState);
   const { user } = membership;
 
   return (
@@ -71,6 +65,8 @@ export function MemberRow({
       {editable ? (
         <div className="mt-2 flex flex-col gap-2">
           <form action={updAction} className="flex flex-wrap items-center gap-3">
+            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="membershipId" value={membership.id} />
             <RoleCheckboxes selected={membership.roles} idPrefix={`m-${membership.id}`} />
             <Button type="submit" variant="secondary" disabled={updPending} className="min-h-9">
               როლების შენახვა
@@ -82,6 +78,8 @@ export function MemberRow({
               if (!confirm(`წავშალოთ ${user.name} პროექტიდან?`)) e.preventDefault();
             }}
           >
+            <input type="hidden" name="projectId" value={projectId} />
+            <input type="hidden" name="membershipId" value={membership.id} />
             <Button type="submit" variant="danger" disabled={rmPending} className="min-h-9">
               პროექტიდან წაშლა
             </Button>
@@ -104,6 +102,8 @@ export function MemberRow({
                   if (!confirm(`წავშალოთ ${user.name} პროექტიდან?`)) e.preventDefault();
                 }}
               >
+                <input type="hidden" name="projectId" value={projectId} />
+                <input type="hidden" name="membershipId" value={membership.id} />
                 <Button type="submit" variant="danger" disabled={rmPending} className="min-h-9">
                   წვდომის გაუქმება
                 </Button>
@@ -124,12 +124,10 @@ export function AddMemberForm({
   projectId: string;
   candidates: { id: string; name: string; email: string }[];
 }) {
-  const [state, action, pending] = useActionState(
-    addMemberAction.bind(null, projectId),
-    initialActionState,
-  );
+  const [state, action, pending] = useActionState(addMemberAction, initialActionState);
   return (
     <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="projectId" value={projectId} />
       <div className="flex flex-col gap-1">
         <label htmlFor="add-member-user" className="text-sm font-medium">
           მომხმარებელი
@@ -164,10 +162,7 @@ export function AddMemberForm({
 }
 
 export function ArchiveButton({ projectId, archived }: { projectId: string; archived: boolean }) {
-  const [state, action, pending] = useActionState(
-    setArchivedAction.bind(null, projectId, !archived),
-    initialActionState,
-  );
+  const [state, action, pending] = useActionState(setArchivedAction, initialActionState);
   return (
     <form
       action={action}
@@ -176,6 +171,8 @@ export function ArchiveButton({ projectId, archived }: { projectId: string; arch
       }}
       className="flex items-center gap-2"
     >
+      <input type="hidden" name="projectId" value={projectId} />
+      <input type="hidden" name="archived" value={archived ? "0" : "1"} />
       <Button type="submit" variant="secondary" disabled={pending}>
         {archived ? "არქივიდან აღდგენა" : "არქივირება"}
       </Button>

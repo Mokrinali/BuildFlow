@@ -54,3 +54,20 @@ export function parseBool(value: unknown): boolean {
   if (typeof value !== "boolean") throw new AppError("VALIDATION", errors.invalidInput);
   return value;
 }
+
+// Server actions receive ids as hidden form fields, not via `action.bind(...)`:
+// in Next.js 16.4 a bound action used with useActionState and posted without JavaScript
+// sends the server into an endless render loop (a one-request denial of service).
+
+/** Read and validate an id from a hidden form field. */
+export function formId(form: FormData, key: string): string {
+  return parseId(form.get(key));
+}
+
+/** Read a "1"/"0" flag from a hidden form field. */
+export function formFlag(form: FormData, key: string): boolean {
+  const v = form.get(key);
+  if (v === "1") return true;
+  if (v === "0") return false;
+  throw new AppError("VALIDATION", errors.invalidInput);
+}

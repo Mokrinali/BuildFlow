@@ -10,11 +10,12 @@ export function ProjectForm({
 }: {
   project?: { id: string; name: string; address: string };
 }) {
-  const action = project ? updateProjectAction.bind(null, project.id) : createProjectAction;
+  const action = project ? updateProjectAction : createProjectAction;
   const [state, formAction, pending] = useActionState(action, initialActionState);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {project && <input type="hidden" name="projectId" value={project.id} />}
       <Field
         label="სახელი"
         name="name"

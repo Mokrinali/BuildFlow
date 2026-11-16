@@ -1,0 +1,170 @@
+"use client";
+
+import { useActionState, useId } from "react";
+import { Button, Card, FormMessage } from "@/components/ui";
+import type { ActionState } from "@/server/action-state";
+import { initialActionState } from "@/server/action-state";
+import type { RequestPermissions } from "@/server/requests/service";
+import {
+  approveAction,
+  cancelAction,
+  rejectAction,
+  reopenAction,
+  returnToDraftAction,
+  submitAction,
+  withdrawAction,
+} from "../actions";
+
+type FormAction = (state: ActionState, form: FormData) => Promise<ActionState>;
+
+function SimpleAction({
+  requestId,
+  action,
+  label,
+  variant = "primary",
+  confirmText,
+}: {
+  requestId: string;
+  action: FormAction;
+  label: string;
+  variant?: "primary" | "secondary";
+  confirmText?: string;
+}) {
+  const [state, formAction, pending] = useActionState(action, initialActionState);
+  return (
+    <form
+      action={formAction}
+      onSubmit={(e) => {
+        if (confirmText && !confirm(confirmText)) e.preventDefault();
+      }}
+      className="flex flex-col gap-2"
+    >
+      <input type="hidden" name="requestId" value={requestId} />
+      <Button type="submit" variant={variant} disabled={pending} className="w-full">
+        {label}
+      </Button>
+      <FormMessage ok={state.ok} message={state.message} />
+    </form>
+  );
+}
+
+function ReasonAction({
+  requestId,
+  action,
+  label,
+  reasonLabel,
+  variant = "secondary",
+}: {
+  requestId: string;
+  action: FormAction;
+  label: string;
+  reasonLabel: string;
+  variant?: "secondary" | "danger";
+}) {
+  const [state, formAction, pending] = useActionState(action, initialActionState);
+  const id = useId();
+  return (
+    <details className="rounded-md border border-line p-3">
+      <summary className="cursor-pointer text-sm font-semibold">{label}</summary>
+      <form action={formAction} className="mt-3 flex flex-col gap-2">
+        <input type="hidden" name="requestId" value={requestId} />
+        <label htmlFor={id} className="text-sm font-medium">
+          {reasonLabel}
+        </label>
+        <textarea
+          id={id}
+          name="reason"
+          rows={3}
+          required
+          minLength={3}
+          maxLength={1000}
+          aria-invalid={state.fieldErrors?.reason ? true : undefined}
+          className="rounded-md border border-steel bg-white px-3 py-2 text-base"
+        />
+        {state.fieldErrors?.reason && (
+          <p className="text-sm text-red-800">{state.fieldErrors.reason}</p>
+        )}
+        <Button type="submit" variant={variant} disabled={pending}>
+          {label}
+        </Button>
+        {!state.fieldErrors && <FormMessage ok={state.ok} message={state.message} />}
+      </form>
+    </details>
+  );
+}
+
+export function RequestActions({
+  requestId,
+  permissions: p,
+}: {
+  requestId: string;
+  permissions: RequestPermissions;
+}) {
+  const any = Object.values(p).some(Boolean);
+  if (!any) return null;
+
+  return (
+    <Card>
+      <h2 className="mb-4 text-lg font-semibold">მოქმედებები</h2>
+      <div className="flex flex-col gap-3">
+        {p.canSubmit && (
+          <SimpleAction
+            requestId={requestId}
+            action={submitAction}
+            label="განსახილველად გაგზავნა"
+          />
+        )}
+        {p.canApprove && (
+          <SimpleAction
+            requestId={requestId}
+            action={approveAction}
+            label="დამტკიცება"
+            confirmText="დავამტკიცოთ მოთხოვნა?"
+          />
+        )}
+        {p.canReject && (
+          <ReasonAction
+            requestId={requestId}
+            action={rejectAction}
+            label="უარყოფა"
+            reasonLabel="უარყოფის მიზეზი"
+            variant="danger"
+          />
+        )}
+        {p.canWithdraw && (
+          <SimpleAction
+            requestId={requestId}
+            action={withdrawAction}
+            label="განხილვიდან დაბრუნება"
+            variant="secondary"
+          />
+        )}
+        {p.canReturnToDraft && (
+          <SimpleAction
+            requestId={requestId}
+            action={returnToDraftAction}
+            label="მონახაზში დაბრუნება"
+            variant="secondary"
+          />
+        )}
+        {p.canReopen && (
+          <ReasonAction
+            requestId={requestId}
+            action={reopenAction}
+            label="ხელახლა გახსნა შესაცვლელად"
+            reasonLabel="რატომ იცვლება დამტკიცებული მოთხოვნა?"
+          />
+        )}
+        {p.canCancel && (
+          <ReasonAction
+            requestId={requestId}
+            action={cancelAction}
+            label="მოთხოვნის გაუქმება"
+            reasonLabel="გაუქმების მიზეზი"
+            variant="danger"
+          />
+        )}
+      </div>
+    </Card>
+  );
+}

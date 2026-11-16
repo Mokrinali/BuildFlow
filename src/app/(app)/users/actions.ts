@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { parseBool, parseId, runAction, type ActionState } from "@/server/action";
+import { formFlag, formId, runAction, type ActionState } from "@/server/action";
 import { requireUser } from "@/server/session";
 import { createUser, resetPassword, setUserActive } from "@/server/users/service";
 
@@ -20,27 +20,19 @@ export async function createUserAction(_: ActionState, form: FormData): Promise<
   return state;
 }
 
-export async function setUserActiveAction(
-  userId: string,
-  active: boolean,
-  _: ActionState,
-): Promise<ActionState> {
+export async function setUserActiveAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await setUserActive(user, parseId(userId), parseBool(active));
+    await setUserActive(user, formId(form, "userId"), formFlag(form, "active"));
   });
   if (state.ok) revalidatePath("/users");
   return state;
 }
 
-export async function resetPasswordAction(
-  userId: string,
-  _: ActionState,
-  form: FormData,
-): Promise<ActionState> {
+export async function resetPasswordAction(_: ActionState, form: FormData): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await resetPassword(user, parseId(userId), String(form.get("password") ?? ""));
+    await resetPassword(user, formId(form, "userId"), String(form.get("password") ?? ""));
     return "დროებითი პაროლი დაყენებულია. მომხმარებელს შესვლისას შეცვლა მოუწევს.";
   });
   if (state.ok) revalidatePath("/users");

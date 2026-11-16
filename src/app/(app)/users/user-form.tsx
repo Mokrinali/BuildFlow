@@ -45,12 +45,11 @@ export function UserForm() {
 }
 
 export function ToggleActiveButton({ userId, active }: { userId: string; active: boolean }) {
-  const [state, action, pending] = useActionState(
-    setUserActiveAction.bind(null, userId, !active),
-    initialActionState,
-  );
+  const [state, action, pending] = useActionState(setUserActiveAction, initialActionState);
   return (
     <form action={action} className="flex items-center gap-2">
+      <input type="hidden" name="userId" value={userId} />
+      <input type="hidden" name="active" value={active ? "0" : "1"} />
       <Button
         type="submit"
         variant={active ? "danger" : "secondary"}
@@ -69,10 +68,7 @@ export function ToggleActiveButton({ userId, active }: { userId: string; active:
 }
 
 export function ResetPasswordForm({ userId, userName }: { userId: string; userName: string }) {
-  const [state, action, pending] = useActionState(
-    resetPasswordAction.bind(null, userId),
-    initialActionState,
-  );
+  const [state, action, pending] = useActionState(resetPasswordAction, initialActionState);
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (state.ok) formRef.current?.reset();
@@ -83,6 +79,7 @@ export function ResetPasswordForm({ userId, userName }: { userId: string; userNa
         პაროლის აღდგენა
       </summary>
       <form ref={formRef} action={action} className="mt-2 flex flex-col gap-2 sm:max-w-sm">
+        <input type="hidden" name="userId" value={userId} />
         <Field
           id={`reset-${userId}`}
           label={`ახალი დროებითი პაროლი: ${userName}`}
