@@ -39,6 +39,7 @@ export function MemberRow({
   projectId,
   membership,
   editable,
+  removable = false,
 }: {
   projectId: string;
   membership: {
@@ -47,6 +48,8 @@ export function MemberRow({
     user: { id: string; name: string; email: string; isActive: boolean };
   };
   editable: boolean;
+  /** Admin on an archived project: roles are frozen, but access can still be revoked. */
+  removable?: boolean;
 }) {
   const [updState, updAction, updPending] = useActionState(
     updateMemberAction.bind(null, projectId, membership.id),
@@ -87,10 +90,27 @@ export function MemberRow({
           <FormMessage ok={rmState.ok} message={rmState.message} />
         </div>
       ) : (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {membership.roles.map((r) => (
-            <Badge key={r}>{projectRoleLabel[r]}</Badge>
-          ))}
+        <div className="mt-1 flex flex-col gap-2">
+          <div className="flex flex-wrap gap-1">
+            {membership.roles.map((r) => (
+              <Badge key={r}>{projectRoleLabel[r]}</Badge>
+            ))}
+          </div>
+          {removable && (
+            <>
+              <form
+                action={rmAction}
+                onSubmit={(e) => {
+                  if (!confirm(`წავშალოთ ${user.name} პროექტიდან?`)) e.preventDefault();
+                }}
+              >
+                <Button type="submit" variant="danger" disabled={rmPending} className="min-h-9">
+                  წვდომის გაუქმება
+                </Button>
+              </form>
+              <FormMessage ok={rmState.ok} message={rmState.message} />
+            </>
+          )}
         </div>
       )}
     </li>

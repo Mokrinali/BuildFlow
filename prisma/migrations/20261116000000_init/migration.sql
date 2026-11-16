@@ -44,6 +44,7 @@ CREATE TABLE "User" (
     "organizationId" TEXT NOT NULL,
     "orgRole" "OrgRole" NOT NULL DEFAULT 'MEMBER',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "mustChangePassword" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL,
 
@@ -206,7 +207,7 @@ CREATE TABLE "OrderItem" (
     "orderId" TEXT NOT NULL,
     "requestItemId" TEXT NOT NULL,
     "quantity" DECIMAL(14,3) NOT NULL,
-    "unitPrice" DECIMAL(14,2) NOT NULL,
+    "unitPrice" DECIMAL(14,4) NOT NULL,
     "note" TEXT,
 
     CONSTRAINT "OrderItem_pkey" PRIMARY KEY ("id")
@@ -239,6 +240,7 @@ CREATE TABLE "ReceiptItem" (
 -- CreateTable
 CREATE TABLE "AuditEvent" (
     "id" TEXT NOT NULL,
+    "seq" BIGSERIAL NOT NULL,
     "organizationId" TEXT NOT NULL,
     "projectId" TEXT,
     "actorId" TEXT,
@@ -280,6 +282,9 @@ CREATE INDEX "Project_organizationId_status_idx" ON "Project"("organizationId", 
 CREATE UNIQUE INDEX "Project_organizationId_name_key" ON "Project"("organizationId", "name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Project_id_organizationId_key" ON "Project"("id", "organizationId");
+
+-- CreateIndex
 CREATE INDEX "ProjectMembership_userId_idx" ON "ProjectMembership"("userId");
 
 -- CreateIndex
@@ -295,10 +300,16 @@ CREATE INDEX "PurchaseRequest_organizationId_status_createdAt_idx" ON "PurchaseR
 CREATE UNIQUE INDEX "PurchaseRequest_organizationId_number_key" ON "PurchaseRequest"("organizationId", "number");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "PurchaseRequest_id_organizationId_key" ON "PurchaseRequest"("id", "organizationId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "RequestItem_requestId_position_key" ON "RequestItem"("requestId", "position");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Supplier_organizationId_name_key" ON "Supplier"("organizationId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Supplier_id_organizationId_key" ON "Supplier"("id", "organizationId");
 
 -- CreateIndex
 CREATE INDEX "PurchaseOrder_requestId_idx" ON "PurchaseOrder"("requestId");
@@ -325,13 +336,16 @@ CREATE INDEX "Receipt_orderId_idx" ON "Receipt"("orderId");
 CREATE INDEX "ReceiptItem_orderItemId_idx" ON "ReceiptItem"("orderItemId");
 
 -- CreateIndex
-CREATE INDEX "AuditEvent_entityType_entityId_createdAt_idx" ON "AuditEvent"("entityType", "entityId", "createdAt");
+CREATE UNIQUE INDEX "AuditEvent_seq_key" ON "AuditEvent"("seq");
+
+-- CreateIndex
+CREATE INDEX "AuditEvent_entityType_entityId_seq_idx" ON "AuditEvent"("entityType", "entityId", "seq");
 
 -- CreateIndex
 CREATE INDEX "AuditEvent_organizationId_createdAt_idx" ON "AuditEvent"("organizationId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "AuditEvent_projectId_createdAt_idx" ON "AuditEvent"("projectId", "createdAt");
+CREATE INDEX "AuditEvent_projectId_seq_idx" ON "AuditEvent"("projectId", "seq");
 
 -- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -355,7 +369,7 @@ ALTER TABLE "ProjectMembership" ADD CONSTRAINT "ProjectMembership_userId_fkey" F
 ALTER TABLE "PurchaseRequest" ADD CONSTRAINT "PurchaseRequest_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PurchaseRequest" ADD CONSTRAINT "PurchaseRequest_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PurchaseRequest" ADD CONSTRAINT "PurchaseRequest_projectId_organizationId_fkey" FOREIGN KEY ("projectId", "organizationId") REFERENCES "Project"("id", "organizationId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PurchaseRequest" ADD CONSTRAINT "PurchaseRequest_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -373,10 +387,10 @@ ALTER TABLE "Supplier" ADD CONSTRAINT "Supplier_organizationId_fkey" FOREIGN KEY
 ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_requestId_fkey" FOREIGN KEY ("requestId") REFERENCES "PurchaseRequest"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_requestId_organizationId_fkey" FOREIGN KEY ("requestId", "organizationId") REFERENCES "PurchaseRequest"("id", "organizationId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_supplierId_fkey" FOREIGN KEY ("supplierId") REFERENCES "Supplier"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_supplierId_organizationId_fkey" FOREIGN KEY ("supplierId", "organizationId") REFERENCES "Supplier"("id", "organizationId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -410,3 +424,11 @@ ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_projectId_fkey" FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Data integrity checks (not expressible in schema.prisma).
+ALTER TABLE "RequestItem" ADD CONSTRAINT "RequestItem_quantity_positive" CHECK ("quantity" > 0);
+ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_quantity_positive" CHECK ("quantity" > 0);
+ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_unitPrice_nonnegative" CHECK ("unitPrice" >= 0);
+ALTER TABLE "ReceiptItem" ADD CONSTRAINT "ReceiptItem_quantity_nonzero" CHECK ("quantity" <> 0);
+ALTER TABLE "PurchaseRequest" ADD CONSTRAINT "PurchaseRequest_number_positive" CHECK ("number" > 0);
+ALTER TABLE "PurchaseOrder" ADD CONSTRAINT "PurchaseOrder_number_positive" CHECK ("number" > 0);

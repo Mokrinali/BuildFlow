@@ -4,7 +4,7 @@ import { Badge, Card, PageHeader } from "@/components/ui";
 import { orgRoleLabel } from "@/lib/i18n/ka";
 import { requireUser } from "@/server/session";
 import { listUsers } from "@/server/users/service";
-import { ToggleActiveButton, UserForm } from "./user-form";
+import { ResetPasswordForm, ToggleActiveButton, UserForm } from "./user-form";
 
 export const metadata: Metadata = { title: "მომხმარებლები" };
 
@@ -29,7 +29,13 @@ export default async function UsersPage() {
                   {orgRoleLabel[u.orgRole]}
                 </Badge>
                 {!u.isActive && <Badge tone="gray">გათიშული</Badge>}
-                {u.id !== user.userId && <ToggleActiveButton userId={u.id} active={u.isActive} />}
+                {u.mustChangePassword && <Badge tone="gray">დროებითი პაროლი</Badge>}
+                {u.id !== user.userId && (
+                  <>
+                    <ToggleActiveButton userId={u.id} active={u.isActive} />
+                    <ResetPasswordForm userId={u.id} userName={u.name} />
+                  </>
+                )}
               </li>
             ))}
           </ul>

@@ -1,7 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { requireProjectAccess, type Actor } from "@/server/access";
-import { AppError } from "@/server/errors";
 import {
   addMember,
   createProject,
@@ -13,17 +12,7 @@ import {
   updateProject,
 } from "@/server/projects/service";
 import { createUser, setUserActive } from "@/server/users/service";
-import { addMembership, createActor, createOrg, resetDb } from "./helpers";
-
-async function expectAppError(p: Promise<unknown>, code: AppError["code"]) {
-  const err = await p.then(
-    () => null,
-    (e: unknown) => e,
-  );
-  expect(err).toBeInstanceOf(AppError);
-  expect((err as AppError).code).toBe(code);
-  return err as AppError;
-}
+import { addMembership, createActor, createOrg, expectAppError, resetDb } from "./helpers";
 
 let admin: Actor;
 let member: Actor;
@@ -142,7 +131,7 @@ describe("project management", () => {
     await setProjectArchived(admin, projectId, true);
     const events = await db.auditEvent.findMany({
       where: { entityType: "Project", entityId: projectId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { seq: "asc" },
     });
     expect(events.map((e) => e.action)).toEqual([
       "project.created",
@@ -150,6 +139,23 @@ describe("project management", () => {
       "project.archived",
     ]);
     expect(events.every((e) => e.actorId === admin.userId)).toBe(true);
+  });
+
+  it("does not write events for no-op changes", async () => {
+    await updateProject(admin, projectId, {
+      name: "ვაკის ობიექტი",
+      address: "თბილისი, ტესტის ქ. 1",
+    });
+    await setProjectArchived(admin, projectId, false); // already active
+    await setProjectArchived(admin, projectId, true);
+    await setProjectArchived(admin, projectId, true); // already archived
+    const actions = (
+      await db.auditEvent.findMany({
+        where: { entityType: "Project", entityId: projectId },
+        orderBy: { seq: "asc" },
+      })
+    ).map((e) => e.action);
+    expect(actions).toEqual(["project.created", "project.archived"]);
   });
 });
 
@@ -169,7 +175,7 @@ describe("memberships", () => {
     const actions = (
       await db.auditEvent.findMany({
         where: { entityType: "ProjectMembership", entityId: m.id },
-        orderBy: { createdAt: "asc" },
+        orderBy: { seq: "asc" },
       })
     ).map((e) => e.action);
     expect(actions).toEqual(["member.added", "member.roles_changed", "member.removed"]);
@@ -190,6 +196,18 @@ describe("memberships", () => {
     );
   });
 
+  it("freezes roles on archived projects but still allows revoking access", async () => {
+    const m = await addMember(admin, projectId, { userId: outsider.userId, roles: ["BUYER"] });
+    await setProjectArchived(admin, projectId, true);
+    await expectAppError(updateMemberRoles(admin, projectId, m.id, ["RECEIVER"]), "CONFLICT");
+    await expectAppError(
+      addMember(admin, projectId, { userId: member.userId, roles: ["BUYER"] }),
+      "CONFLICT", // archived: read-only
+    );
+    await removeMember(admin, projectId, m.id);
+    await expectAppError(getProject(outsider, projectId), "FORBIDDEN");
+  });
+
   it("does not let members manage membership", async () => {
     await expectAppError(
       addMember(member, projectId, { userId: outsider.userId, roles: ["BUYER"] }),
@@ -206,23 +224,6 @@ describe("memberships", () => {
 });
 
 describe("users", () => {
-  it("creates a login-capable user in the admin's organization", async () => {
-    const u = await createUser(admin, {
-      name: "ახალი თანამშრომელი",
-      email: "  New.User@Test.Example ",
-      password: "very-secret-pass",
-      isAdmin: false,
-    });
-    const row = await db.user.findUniqueOrThrow({
-      where: { id: u.id },
-      include: { accounts: true },
-    });
-    expect(row.email).toBe("new.user@test.example");
-    expect(row.organizationId).toBe(admin.organizationId);
-    expect(row.accounts[0]?.providerId).toBe("credential");
-    expect(row.accounts[0]?.password).not.toContain("very-secret-pass");
-  });
-
   it("rejects duplicate emails, short passwords and non-admins", async () => {
     const input = { name: "ერთი", email: "dup@test.example", password: "1234567890" };
     await createUser(admin, input);

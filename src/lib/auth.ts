@@ -2,11 +2,18 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "@/lib/db";
+import { assertProductionEnv } from "@/lib/env";
+
+assertProductionEnv();
 
 const baseURL = process.env.BETTER_AUTH_URL;
+const isProd = process.env.NODE_ENV === "production";
 
 export const auth = betterAuth({
   baseURL,
+  // Self-service profile/email changes and account deletion are disabled: names appear in the
+  // audit timeline, so only admins manage them. Password change goes through our server action.
+  disabledPaths: ["/update-user", "/change-email", "/delete-user", "/change-password"],
   secret: process.env.BETTER_AUTH_SECRET,
   trustedOrigins: baseURL ? [baseURL] : [],
   database: prismaAdapter(db, { provider: "postgresql" }),
@@ -23,6 +30,7 @@ export const auth = betterAuth({
       organizationId: { type: "string", required: true, input: false },
       orgRole: { type: "string", required: false, input: false, defaultValue: "MEMBER" },
       isActive: { type: "boolean", required: false, input: false, defaultValue: true },
+      mustChangePassword: { type: "boolean", required: false, input: false, defaultValue: false },
     },
   },
   session: {
@@ -39,9 +47,10 @@ export const auth = betterAuth({
     },
   },
   advanced: {
-    useSecureCookies: process.env.NODE_ENV === "production",
-    // Behind Cloudflare Tunnel the real client IP arrives in CF-Connecting-IP.
-    ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] },
+    useSecureCookies: isProd,
+    // Production runs only behind Cloudflare Tunnel (the app port is not published), so
+    // CF-Connecting-IP is set by Cloudflare and cannot be forged by the client.
+    ipAddress: { ipAddressHeaders: isProd ? ["cf-connecting-ip"] : ["x-forwarded-for"] },
   },
   databaseHooks: {
     session: {

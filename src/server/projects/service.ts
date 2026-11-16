@@ -99,6 +99,7 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
     return await db.$transaction(async (tx) => {
       await requireProjectAccess(tx, actor, projectId, { write: true });
       const before = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
+      if (before.name === input.name && before.address === input.address) return before;
       const project = await tx.project.update({ where: { id: projectId }, data: input });
       await recordEvent(tx, actor, {
         entityType: "Project",
@@ -121,7 +122,10 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
 export async function setProjectArchived(actor: Actor, projectId: string, archived: boolean) {
   assertAdmin(actor);
   return db.$transaction(async (tx) => {
-    await requireProjectAccess(tx, actor, projectId);
+    const access = await requireProjectAccess(tx, actor, projectId);
+    if (access.archived === archived) {
+      return tx.project.findUniqueOrThrow({ where: { id: projectId } }); // already in that state
+    }
     const project = await tx.project.update({
       where: { id: projectId },
       data: archived
@@ -200,7 +204,8 @@ export async function updateMemberRoles(
 export async function removeMember(actor: Actor, projectId: string, membershipId: string) {
   assertAdmin(actor);
   return db.$transaction(async (tx) => {
-    await requireProjectAccess(tx, actor, projectId, { write: true });
+    // Allowed on archived projects too, so access to their history can be revoked.
+    await requireProjectAccess(tx, actor, projectId);
     const membership = await tx.projectMembership.findUnique({ where: { id: membershipId } });
     if (!membership || membership.projectId !== projectId) throw notFound();
     await tx.projectMembership.delete({ where: { id: membershipId } });

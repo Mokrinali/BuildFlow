@@ -11,10 +11,16 @@ const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 });
 
-// Demo password for every seeded account. The default is public (this repo is public),
-// so production seeding requires an explicit SEED_PASSWORD.
-if (process.env.NODE_ENV === "production" && !process.env.SEED_PASSWORD) {
-  throw new Error("Set SEED_PASSWORD to seed a production database.");
+// Demo password for every seeded account. The default is public (this repo is public), so it is
+// only allowed against a database on this machine. Anything else needs an explicit SEED_PASSWORD.
+// For production, do not seed: create the first admin with `npm run create-admin`.
+const dbHost = new URL(process.env.DATABASE_URL!).hostname;
+const isLocalDb = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(dbHost);
+if ((!isLocalDb || process.env.NODE_ENV === "production") && !process.env.SEED_PASSWORD) {
+  throw new Error(
+    `Refusing to seed ${dbHost} with the public demo password. Set SEED_PASSWORD, ` +
+      "or use `npm run create-admin` for a real organization.",
+  );
 }
 const DEMO_PASSWORD = process.env.SEED_PASSWORD ?? "BuildFlow-demo-2026";
 

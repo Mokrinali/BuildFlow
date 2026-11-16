@@ -47,7 +47,7 @@ export default async function ProjectPage({ params }: Props) {
     : [];
   const events = await db.auditEvent.findMany({
     where: { projectId, organizationId: user.organizationId },
-    orderBy: { createdAt: "desc" },
+    orderBy: { seq: "desc" },
     take: 20,
     select: { id: true, action: true, createdAt: true, actor: { select: { name: true } } },
   });
@@ -87,7 +87,13 @@ export default async function ProjectPage({ params }: Props) {
           ) : (
             <ul className="divide-y divide-line">
               {project.memberships.map((m) => (
-                <MemberRow key={m.id} projectId={project.id} membership={m} editable={editable} />
+                <MemberRow
+                  key={m.id}
+                  projectId={project.id}
+                  membership={m}
+                  editable={editable}
+                  removable={user.isAdmin}
+                />
               ))}
             </ul>
           )}

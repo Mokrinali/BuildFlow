@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDateTime, formatMoney, formatWorkDate, todayInTbilisi } from "./format";
+import { formatDate, formatDateTime, formatMoney, formatWorkDate, todayInTbilisi } from "./format";
 
 describe("ka-GE formatting", () => {
   it("shows timestamps in Tbilisi time (UTC+4)", () => {
@@ -12,8 +12,11 @@ describe("ka-GE formatting", () => {
     expect(todayInTbilisi(new Date("2026-11-16T21:00:00Z"))).toBe("2026-11-17");
   });
 
-  it("does not shift @db.Date work dates", () => {
-    expect(formatWorkDate(new Date("2026-11-16T00:00:00Z"))).toContain("16");
+  it("shows @db.Date work dates as stored, not shifted to the next Tbilisi day", () => {
+    // 22:00 UTC is already the next day in Tbilisi: a timestamp moves, a work date must not.
+    const d = new Date("2026-11-16T22:00:00Z");
+    expect(formatDate(d)).toBe("17.11.2026");
+    expect(formatWorkDate(d)).toBe("16.11.2026");
   });
 
   it("formats GEL amounts", () => {

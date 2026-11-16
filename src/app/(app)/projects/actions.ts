@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { runAction, type ActionState } from "@/server/action";
+import { parseBool, parseId, runAction, type ActionState } from "@/server/action";
 import {
   addMember,
   createProject,
@@ -13,6 +13,7 @@ import {
 } from "@/server/projects/service";
 import { requireUser } from "@/server/session";
 
+// Bound arguments (ids, flags) come from the client, so every action validates them.
 const str = (form: FormData, key: string) => String(form.get(key) ?? "");
 const roles = (form: FormData) => form.getAll("roles").map(String);
 
@@ -38,7 +39,7 @@ export async function updateProjectAction(
 ): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await updateProject(user, projectId, {
+    await updateProject(user, parseId(projectId), {
       name: str(form, "name"),
       address: str(form, "address"),
     });
@@ -55,8 +56,9 @@ export async function setArchivedAction(
 ): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await setProjectArchived(user, projectId, archived);
-    return archived ? "პროექტი არქივირებულია." : "პროექტი აღდგენილია.";
+    const value = parseBool(archived);
+    await setProjectArchived(user, parseId(projectId), value);
+    return value ? "პროექტი არქივირებულია." : "პროექტი აღდგენილია.";
   });
   if (state.ok) revalidatePath("/", "layout");
   return state;
@@ -69,7 +71,7 @@ export async function addMemberAction(
 ): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await addMember(user, projectId, { userId: str(form, "userId"), roles: roles(form) });
+    await addMember(user, parseId(projectId), { userId: str(form, "userId"), roles: roles(form) });
     return "წევრი დამატებულია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);
@@ -84,7 +86,7 @@ export async function updateMemberAction(
 ): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await updateMemberRoles(user, projectId, membershipId, roles(form));
+    await updateMemberRoles(user, parseId(projectId), parseId(membershipId), roles(form));
     return "როლები განახლებულია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);
@@ -98,7 +100,7 @@ export async function removeMemberAction(
 ): Promise<ActionState> {
   const user = await requireUser();
   const state = await runAction(async () => {
-    await removeMember(user, projectId, membershipId);
+    await removeMember(user, parseId(projectId), parseId(membershipId));
     return "წევრი წაშლილია.";
   });
   if (state.ok) revalidatePath(`/projects/${projectId}`);

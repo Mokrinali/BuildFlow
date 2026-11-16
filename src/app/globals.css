@@ -23,8 +23,12 @@ body {
   color: var(--color-navy);
 }
 
-/* Visible keyboard focus everywhere. */
+/* Visible keyboard focus everywhere: navy on light surfaces (orange is only ~2.5:1 on white),
+   orange on the navy sidebar. */
 :focus-visible {
-  outline: 3px solid var(--color-orange);
+  outline: 3px solid var(--color-navy);
   outline-offset: 2px;
+}
+.bg-navy :focus-visible {
+  outline-color: var(--color-orange);
 }

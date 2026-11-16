@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { expect } from "vitest";
+import { AppError } from "@/server/errors";
 import type { ProjectRole } from "@/generated/prisma/enums";
 import { db } from "@/lib/db";
 import type { Actor } from "@/server/access";
@@ -31,6 +33,17 @@ export async function createActor(
     },
   });
   return { userId: id, organizationId, isAdmin: !!opts.admin };
+}
+
+/** Await a promise that must reject with an AppError of the given code. */
+export async function expectAppError(p: Promise<unknown>, code: AppError["code"]) {
+  const err = await p.then(
+    () => null,
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(AppError);
+  expect((err as AppError).code).toBe(code);
+  return err as AppError;
 }
 
 export async function addMembership(projectId: string, userId: string, roles: ProjectRole[]) {

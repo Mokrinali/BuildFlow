@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { Button, Field, FormMessage } from "@/components/ui";
 import { initialActionState } from "@/server/action-state";
-import { createUserAction, setUserActiveAction } from "./actions";
+import { createUserAction, resetPasswordAction, setUserActiveAction } from "./actions";
 
 export function UserForm() {
   const [state, action, pending] = useActionState(createUserAction, initialActionState);
@@ -65,5 +65,38 @@ export function ToggleActiveButton({ userId, active }: { userId: string; active:
         </span>
       )}
     </form>
+  );
+}
+
+export function ResetPasswordForm({ userId, userName }: { userId: string; userName: string }) {
+  const [state, action, pending] = useActionState(
+    resetPasswordAction.bind(null, userId),
+    initialActionState,
+  );
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (state.ok) formRef.current?.reset();
+  }, [state]);
+  return (
+    <details className="w-full">
+      <summary className="cursor-pointer text-sm font-medium underline underline-offset-4">
+        პაროლის აღდგენა
+      </summary>
+      <form ref={formRef} action={action} className="mt-2 flex flex-col gap-2 sm:max-w-sm">
+        <Field
+          id={`reset-${userId}`}
+          label={`ახალი დროებითი პაროლი: ${userName}`}
+          name="password"
+          type="password"
+          autoComplete="new-password"
+          required
+          error={state.fieldErrors?.password}
+        />
+        <FormMessage ok={state.ok} message={state.message} />
+        <Button type="submit" variant="secondary" disabled={pending} className="self-start">
+          პაროლის დაყენება
+        </Button>
+      </form>
+    </details>
   );
 }
