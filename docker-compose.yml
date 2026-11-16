@@ -1,0 +1,65 @@
+# BuildFlow production stack: PostgreSQL + app + Cloudflare Tunnel.
+# Configuration comes from .env next to this file (created by deploy/setup.ps1).
+#
+# No port is published to the host or the LAN: the only way in is the Cloudflare Tunnel.
+# This matters for security: the app trusts the CF-Connecting-IP header for login rate limits.
+
+name: buildflow
+
+services:
+  db:
+    image: postgres:18.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: buildflow
+      POSTGRES_DB: buildflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/<major>/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buildflow -d buildflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  # Applies database migrations, then exits. The app starts only after it succeeds.
+  migrate:
+    build: { context: ., target: tools }
+    image: buildflow-tools
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://buildflow:${POSTGRES_PASSWORD}@db:5432/buildflow
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+
+  app:
+    build: { context: ., target: runner }
+    image: buildflow-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://buildflow:${POSTGRES_PASSWORD}@db:5432/buildflow
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?set BETTER_AUTH_URL in .env}
+    depends_on:
+      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    networks: [internal]
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.0
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      app: { condition: service_healthy }
+    networks: [internal]
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
