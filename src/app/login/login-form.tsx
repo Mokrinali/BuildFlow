@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button, Field, FormMessage } from "@/components/ui";
+import { PasswordField } from "@/components/password-field";
 import { authClient } from "@/lib/auth-client";
 import { errors } from "@/lib/i18n/ka";
 
@@ -42,12 +43,12 @@ export function LoginForm() {
         className={inputClass}
         required
       />
-      <Field
+      <PasswordField
         label="პაროლი"
         name="password"
-        type="password"
         autoComplete="current-password"
         className={inputClass}
+        toggleClassName="text-[#c5d3e0] hover:text-white"
         required
       />
       <FormMessage ok={false} message={message} />

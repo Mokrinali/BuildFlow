@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { Button, Field, FormMessage } from "@/components/ui";
+import { PasswordField } from "@/components/password-field";
 import { submitKeepingValues } from "@/components/keep-values";
 import { initialActionState } from "@/server/action-state";
 import { createUserAction, resetPasswordAction, setUserActiveAction } from "./actions";
@@ -29,10 +30,9 @@ export function UserForm() {
         required
         error={state.fieldErrors?.email}
       />
-      <Field
+      <PasswordField
         label="დროებითი პაროლი"
         name="password"
-        type="password"
         autoComplete="new-password"
         required
         hint="მინიმუმ 10 სიმბოლო. გადაეცით მომხმარებელს უსაფრთხოდ."
@@ -91,11 +91,10 @@ export function ResetPasswordForm({ userId, userName }: { userId: string; userNa
         className="mt-2 flex flex-col gap-2 sm:max-w-sm"
       >
         <input type="hidden" name="userId" value={userId} />
-        <Field
+        <PasswordField
           id={`reset-${userId}`}
           label={`ახალი დროებითი პაროლი: ${userName}`}
           name="password"
-          type="password"
           autoComplete="new-password"
           required
           error={state.fieldErrors?.password}

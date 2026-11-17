@@ -34,30 +34,51 @@ export function ButtonLink({
   return <Link className={buttonClass(variant, className)} {...props} />;
 }
 
+export const fieldInputClass =
+  "min-h-10 rounded-md border border-steel bg-white px-3 text-base text-navy placeholder:text-steel-600 aria-invalid:border-red-700";
+
 export function Field({
   label,
   name,
   error,
   hint,
+  adornment,
   ...input
-}: ComponentProps<"input"> & { label: string; name: string; error?: string; hint?: string }) {
+}: ComponentProps<"input"> & {
+  label: string;
+  name: string;
+  error?: string;
+  hint?: string;
+  /** Rendered over the right edge of the input, e.g. a show-password button. */
+  adornment?: ReactNode;
+}) {
   const id = input.id ?? `f-${name}`;
   const describedBy = [error ? `${id}-err` : null, hint ? `${id}-hint` : null]
     .filter(Boolean)
     .join(" ");
+  const field = (
+    <input
+      id={id}
+      name={name}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={describedBy || undefined}
+      className={fieldInputClass}
+      {...input}
+    />
+  );
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      <input
-        id={id}
-        name={name}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy || undefined}
-        className="min-h-10 rounded-md border border-steel bg-white px-3 text-base text-navy placeholder:text-steel-600 aria-invalid:border-red-700"
-        {...input}
-      />
+      {adornment ? (
+        <div className="relative flex flex-col">
+          {field}
+          {adornment}
+        </div>
+      ) : (
+        field
+      )}
       {hint && (
         <p id={`${id}-hint`} className="text-xs text-steel-600">
           {hint}
