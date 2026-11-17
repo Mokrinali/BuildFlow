@@ -6,6 +6,9 @@ import { Button, Field, FormMessage } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
 import { errors } from "@/lib/i18n/ka";
 
+const inputClass =
+  "min-h-11 rounded-lg border border-[#829ab2] bg-[#102e49] px-3 text-base text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange";
+
 export function LoginForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -30,17 +33,29 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-      <Field label="ელფოსტა" name="email" type="email" autoComplete="username" required />
+    <form onSubmit={onSubmit} className="flex flex-col gap-5" noValidate>
+      <Field
+        label="ელფოსტა"
+        name="email"
+        type="email"
+        autoComplete="username"
+        className={inputClass}
+        required
+      />
       <Field
         label="პაროლი"
         name="password"
         type="password"
         autoComplete="current-password"
+        className={inputClass}
         required
       />
       <FormMessage ok={false} message={message} />
-      <Button type="submit" disabled={pending}>
+      <Button
+        type="submit"
+        disabled={pending}
+        className="mt-1 h-11 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      >
         {pending ? "შესვლა…" : "შესვლა"}
       </Button>
     </form>

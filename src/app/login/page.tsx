@@ -9,20 +9,18 @@ export const metadata: Metadata = { title: "შესვლა" };
 export default async function LoginPage() {
   if (await getCurrentUser()) redirect("/");
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-10">
-      <div className="w-full max-w-sm">
+    <main className="flex min-h-dvh items-center justify-center bg-[#08233d] bg-[url('/brand/login-blueprint.webp')] bg-cover bg-center px-4 py-10 text-white">
+      <div className="w-full max-w-md rounded-2xl border border-[#42617b] bg-[#09243e] p-6 shadow-2xl sm:p-9">
         <Image
-          src="/brand/buildflow-lockup.svg"
+          src="/brand/buildflow-lockup-light.svg"
           alt="BuildFlow"
           width={220}
           height={48}
           priority
           className="mx-auto mb-8 h-12 w-auto"
         />
-        <div className="rounded-lg border border-line bg-white p-6 shadow-sm">
-          <h1 className="mb-4 text-xl font-bold">სისტემაში შესვლა</h1>
-          <LoginForm />
-        </div>
+        <h1 className="mb-7 text-center text-2xl font-bold">სისტემაში შესვლა</h1>
+        <LoginForm />
       </div>
     </main>
   );
