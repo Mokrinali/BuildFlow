@@ -106,6 +106,30 @@ powershell -ExecutionPolicy Bypass -File deploy\update.ps1
 იღებს სარეზერვო ასლს, ჩამოტვირთავს ახალ კოდს GitHub-დან, აწყობს და გადატვირთავს სტეკს.
 მიგრაციები ავტომატურად ეშვება.
 
+### დისტანციური მართვა SSH-ით
+
+სერვერზე ჩართულია OpenSSH, მხოლოდ გასაღებით შესვლით (პაროლი გამორთულია, firewall-ში
+პორტი 22 დახურულია). გარედან მისასვლელია მხოლოდ Cloudflare Tunnel-ის route-ით
+`ssh.siteflow.win → ssh://host.docker.internal:22`. კლიენტს სჭირდება `cloudflared` და
+`~/.ssh/config`-ში:
+
+```
+Host gravita
+  HostName ssh.siteflow.win
+  User USER
+  IdentityFile ~/.ssh/gravita_ed25519
+  ProxyCommand C:/Users/<user>/bin/cloudflared.exe access ssh --hostname %h
+```
+
+SSH სესიიდან `docker compose build` ვერ მუშაობს (Windows Credential Manager მიუწვდომელია
+გასაღებით შესულ სესიაში). ამიტომ განახლება ეშვება დაგეგმილი დავალებით, რომელიც
+`deploy\register-update-task.ps1`-მა ერთხელ დაარეგისტრირა:
+
+```
+ssh gravita "Start-ScheduledTask 'BuildFlow update'"
+ssh gravita "Get-Content $env:USERPROFILE\buildflow-update.log -Tail 30"
+```
+
 ## პრობლემების დიაგნოსტიკა
 
 ```powershell
