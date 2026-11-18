@@ -89,6 +89,21 @@ export const errors = {
   importRepeat:
     "ეს ტექსტი ამ პროექტში უკვე შემოტანილია. თუ ხელახლა შემოტანა განზრახ გსურთ, მონიშნეთ შესაბამისი ველი.",
   correctionOfCorrection: "შესწორდება მხოლოდ თავდაპირველი მიღების ჩანაწერი.",
+  adjustNotAllowed: "დამტკიცებული რაოდენობის შეცვლა ამ სტატუსში შეუძლებელია.",
+  adjustBelowOrdered: "დამტკიცებული რაოდენობა ვერ იქნება შეკვეთილზე ან მიღებულზე ნაკლები.",
+  adjustSame: "ახალი რაოდენობა ემთხვევა მიმდინარე დამტკიცებულს.",
+  adjustZero: "რაოდენობა უნდა იყოს დადებითი. სრული გაუქმებისთვის გამოიყენეთ „დარჩენილის გაუქმება“.",
+  requestItemForeign: "პოზიცია ამ მოთხოვნას არ ეკუთვნის.",
+  orderNothingToClose: "შეკვეთაზე დასახური ხაზი აღარ არის: ყველაფერი მიღებულია ან დახურულია.",
+  receiptLineClosed: "ეს პოზიცია შეკვეთაში დახურულია. მიღება აღარ ფიქსირდება.",
+  correctionClosedIncrease: "დახურულ ხაზზე მიღებული რაოდენობის გაზრდა შეუძლებელია.",
+  cancelNotAllowed: "დარჩენილის გაუქმება ამ სტატუსში შეუძლებელია.",
+  cancelNothingLeft: "პოზიციაზე გასაუქმებელი დარჩენილი რაოდენობა არ არის.",
+  cancelPendingExists: "ამ პოზიციაზე გაუქმების მოთხოვნა უკვე განხილვის მოლოდინშია.",
+  cancelNotPending: "გაუქმების მოთხოვნა უკვე გადაწყვეტილია ან გაწვეულია.",
+  cancelOwnDecision: "საკუთარ მოთხოვნას ვერ დაადასტურებთ: საჭიროა მეორე მხარე.",
+  cancelWrongSide:
+    "გაუქმებას ადასტურებს მეორე მხარე: მომთხოვნის მოთხოვნას — შემსყიდველი, შემსყიდველისას — მომთხოვნი.",
 } as const;
 
 /** Badge tone per request status (always shown together with the text label). */
@@ -119,6 +134,11 @@ export const requestEventLabel: Record<string, string> = {
   "request.cancelled": "გაუქმდა",
   "request.imported": "მოთხოვნა შეიქმნა WhatsApp ტექსტიდან",
   "request.status_changed": "სტატუსი შეიცვალა",
+  "request.item_adjusted": "დამტკიცებული რაოდენობა შეიცვალა",
+  "request.cancel_requested": "მოთხოვნილია დარჩენილის გაუქმება",
+  "request.cancel_confirmed": "დარჩენილის გაუქმება დადასტურდა",
+  "request.cancel_rejected": "დარჩენილის გაუქმება უარყოფილია",
+  "request.cancel_withdrawn": "დარჩენილის გაუქმების მოთხოვნა გაწვეულია",
 };
 
 export const orderStatusLabel: Record<OrderStatus, string> = {
@@ -133,13 +153,14 @@ export const currencyLabel: Record<Currency, string> = {
 };
 
 /** Delivery progress of an order (derived from received vs ordered quantities). */
-export type DeliveryState = "CANCELLED" | "AWAITING" | "PARTIAL" | "RECEIVED";
+export type DeliveryState = "CANCELLED" | "AWAITING" | "PARTIAL" | "RECEIVED" | "CLOSED";
 
 export const deliveryStateLabel: Record<DeliveryState, string> = {
   CANCELLED: "გაუქმებული",
   AWAITING: "მოსალოდნელი",
   PARTIAL: "ნაწილობრივ მიღებული",
   RECEIVED: "მიღებული",
+  CLOSED: "დახურული (ნაწილობრივ)",
 };
 
 export const deliveryStateTone: Record<DeliveryState, "gray" | "navy" | "green" | "orange"> = {
@@ -147,11 +168,13 @@ export const deliveryStateTone: Record<DeliveryState, "gray" | "navy" | "green" 
   AWAITING: "navy",
   PARTIAL: "orange",
   RECEIVED: "green",
+  CLOSED: "gray",
 };
 
 export const orderEventLabel: Record<string, string> = {
   "order.created": "შეკვეთა გაფორმდა",
   "order.cancelled": "შეკვეთა გაუქმდა",
+  "order.closed": "შეკვეთა დაიხურა ნაკლები რაოდენობით",
   "receipt.created": "მიწოდება დაფიქსირდა",
   "receipt.corrected": "მიღება შესწორდა",
   "supplier.created": "მომწოდებელი დაემატა",

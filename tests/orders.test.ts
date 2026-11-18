@@ -628,7 +628,12 @@ describe("receipts", () => {
     );
     await expectAppError(cancelOrder(buyer, orderId, "არქივი"), "CONFLICT");
     const detail = await getOrder(receiver, orderId);
-    expect(detail.permissions).toEqual({ canReceive: false, canCancel: false, canCorrect: false });
+    expect(detail.permissions).toEqual({
+      canReceive: false,
+      canCancel: false,
+      canCorrect: false,
+      canClose: false,
+    });
   });
 });
 

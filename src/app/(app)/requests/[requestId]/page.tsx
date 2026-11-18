@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeliveryBadge, RequestStatusBadge } from "@/components/request-status";
@@ -11,6 +12,7 @@ import { AppError } from "@/server/errors";
 import { totalsByCurrency } from "@/server/orders/service";
 import { getRequest } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
+import { ItemActions } from "./item-actions";
 import { RequestActions } from "./request-actions";
 
 export const metadata: Metadata = { title: "მოთხოვნა" };
@@ -45,6 +47,17 @@ const notices: Record<string, { ok: boolean; text: string; status: string }> = {
 function statusTo(changes: unknown): RequestStatus | null {
   const to = (changes as { to?: unknown } | null)?.to;
   return typeof to === "string" && to in requestStatusLabel ? (to as RequestStatus) : null;
+}
+
+/** "ცემენტი: 1,5 → 2" or "ცემენტი" for item-level events. */
+function itemNote(changes: unknown): string | null {
+  const c = changes as { name?: unknown; from?: unknown; to?: unknown; cancelled?: unknown } | null;
+  if (typeof c?.name !== "string") return null;
+  if (typeof c.from === "string" && typeof c.to === "string" && !(c.to in requestStatusLabel)) {
+    return `${c.name}: ${formatQuantity(c.from)} → ${formatQuantity(c.to)}`;
+  }
+  if (typeof c.cancelled === "string") return `${c.name}: გაუქმდა ${formatQuantity(c.cancelled)}`;
+  return c.name;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -165,28 +178,48 @@ export default async function RequestPage({ params, searchParams }: Props) {
                         <th className="py-2 pr-3">დასახელება</th>
                         <th className="py-2 pr-3">ერთეული</th>
                         <th className="py-2 pr-3 text-right">მოთხოვნილი</th>
+                        <th className="py-2 pr-3 text-right">დამტკიცებული</th>
                         <th className="py-2 pr-3 text-right">შეკვეთილი</th>
                         <th className="py-2 pr-3 text-right">მიღებული</th>
                         <th className="py-2 text-right">დარჩენილი</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-line">
+                    <tbody>
                       {items.map((it) => (
-                        <tr key={it.id} className="align-top">
-                          <td className="py-2 pr-3 text-steel-600">{it.position}</td>
-                          <td className="py-2 pr-3">
-                            <span className="font-medium">{it.name}</span>
-                            {it.spec && <span className="text-steel-600"> · {it.spec}</span>}
-                            {it.note && <p className="text-xs text-steel-600">{it.note}</p>}
-                          </td>
-                          <td className="py-2 pr-3">{it.unit}</td>
-                          <td className="py-2 pr-3 text-right font-medium">
-                            {formatQuantity(it.quantity)}
-                          </td>
-                          <td className="py-2 pr-3 text-right">{formatQuantity(it.ordered)}</td>
-                          <td className="py-2 pr-3 text-right">{formatQuantity(it.received)}</td>
-                          <td className="py-2 text-right">{formatQuantity(it.remaining)}</td>
-                        </tr>
+                        <Fragment key={it.id}>
+                          <tr className="border-t border-line align-top">
+                            <td className="py-2 pr-3 text-steel-600">{it.position}</td>
+                            <td className="py-2 pr-3">
+                              <span className="font-medium">{it.name}</span>
+                              {it.spec && <span className="text-steel-600"> · {it.spec}</span>}
+                              {it.note && <p className="text-xs text-steel-600">{it.note}</p>}
+                            </td>
+                            <td className="py-2 pr-3">{it.unit}</td>
+                            <td className="py-2 pr-3 text-right">{formatQuantity(it.quantity)}</td>
+                            <td className="py-2 pr-3 text-right font-medium">
+                              {it.changed ? (
+                                <span title="შემსყიდველმა შეცვალა">
+                                  <span aria-hidden="true">✎ </span>
+                                  {formatQuantity(it.approved)}
+                                  <span className="sr-only"> (შეცვლილია)</span>
+                                </span>
+                              ) : (
+                                formatQuantity(it.approved)
+                              )}
+                            </td>
+                            <td className="py-2 pr-3 text-right">{formatQuantity(it.ordered)}</td>
+                            <td className="py-2 pr-3 text-right">{formatQuantity(it.received)}</td>
+                            <td className="py-2 text-right">{formatQuantity(it.remaining)}</td>
+                          </tr>
+                          {(it.canAdjust || it.canRequestCancel || it.pendingCancellation) && (
+                            <tr>
+                              <td />
+                              <td colSpan={7} className="pb-3">
+                                <ItemActions requestId={request.id} item={it} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
@@ -204,8 +237,14 @@ export default async function RequestPage({ params, searchParams }: Props) {
                       {it.note && <p className="text-xs text-steel-600">{it.note}</p>}
                       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
                         <dt className="text-steel-600">მოთხოვნილი</dt>
-                        <dd className="text-right font-medium">
+                        <dd className="text-right">
                           {formatQuantity(it.quantity)} {it.unit}
+                        </dd>
+                        <dt className="text-steel-600">დამტკიცებული</dt>
+                        <dd className="text-right font-medium">
+                          {it.changed && <span aria-hidden="true">✎ </span>}
+                          {formatQuantity(it.approved)} {it.unit}
+                          {it.changed && <span className="sr-only"> (შეცვლილია)</span>}
                         </dd>
                         <dt className="text-steel-600">შეკვეთილი</dt>
                         <dd className="text-right">{formatQuantity(it.ordered)}</dd>
@@ -214,6 +253,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
                         <dt className="text-steel-600">დარჩენილი</dt>
                         <dd className="text-right">{formatQuantity(it.remaining)}</dd>
                       </dl>
+                      <ItemActions requestId={request.id} item={it} />
                     </li>
                   ))}
                 </ul>
@@ -282,6 +322,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
                       </>
                     )}
                   </p>
+                  {itemNote(e.changes) && <p>{itemNote(e.changes)}</p>}
                   {e.reason && <p className="text-steel-600">„{e.reason}“</p>}
                   <p className="text-xs text-steel-600">
                     {formatDateTime(e.createdAt)} · {e.actor?.name ?? "სისტემა"}

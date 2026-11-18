@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { RequestStatusBadge } from "@/components/request-status";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
-import { formatWorkDate } from "@/lib/format";
+import { formatDateTime, formatWorkDate } from "@/lib/format";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import { orderDashboard } from "@/server/orders/service";
 import { listProjects } from "@/server/projects/service";
-import { requestDashboard } from "@/server/requests/service";
+import { cancellationsToDecide, requestDashboard } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
 
 type Props = { searchParams: Promise<{ password?: string }> };
@@ -53,10 +53,11 @@ function Stat({ href, value, label }: { href: string; value: number; label: stri
 
 export default async function DashboardPage({ searchParams }: Props) {
   const user = await requireUser();
-  const [projects, dash, orders, { password }] = await Promise.all([
+  const [projects, dash, orders, toDecide, { password }] = await Promise.all([
     listProjects(user),
     requestDashboard(user),
     orderDashboard(user),
+    cancellationsToDecide(user),
     searchParams,
   ]);
 
@@ -69,6 +70,44 @@ export default async function DashboardPage({ searchParams }: Props) {
         </p>
       )}
       <p className="mb-6 text-steel-600">გამარჯობა, {user.name}!</p>
+      {toDecide.length > 0 && (
+        <section
+          aria-labelledby="to-decide"
+          className="mb-6 rounded-lg border-2 border-orange bg-white p-4 sm:p-6"
+        >
+          <h2 id="to-decide" className="font-semibold">
+            დასადასტურებელი გაუქმებები ({toDecide.length})
+          </h2>
+          <p className="text-sm text-steel-600">
+            მეორე მხარე ითხოვს დარჩენილი რაოდენობის გაუქმებას. გახსენით მოთხოვნა და დაადასტურეთ ან
+            უარყავით.
+          </p>
+          <ul className="mt-3 flex flex-col gap-3 border-t border-line pt-3 text-sm">
+            {toDecide.map((c) => (
+              <li key={c.id}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold">
+                    მოთხოვნა {formatRequestNumber(c.request.number)} · {c.itemName}
+                  </span>
+                  <Link
+                    href={`/requests/${c.request.id}`}
+                    className="font-medium underline underline-offset-4"
+                    aria-label={`მოთხოვნა ${formatRequestNumber(c.request.number)}: გადაწყვეტა`}
+                  >
+                    გადაწყვეტა →
+                  </Link>
+                </div>
+                <p className="text-steel-600">
+                  {c.request.projectName} · {c.requestedBy} (
+                  {c.side === "REQUESTER" ? "მომთხოვნი" : "შემსყიდველი"}),{" "}
+                  {formatDateTime(c.createdAt)}
+                </p>
+                <p>„{c.reason}“</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card>
           <h2 className="mb-3 font-semibold">მიმდინარე მოთხოვნები</h2>

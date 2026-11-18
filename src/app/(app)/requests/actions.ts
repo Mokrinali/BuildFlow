@@ -6,14 +6,18 @@ import { errors } from "@/lib/i18n/ka";
 import { formId, formPayload, runAction, type ActionState } from "@/server/action";
 import { AppError } from "@/server/errors";
 import {
+  adjustApprovedQuantity,
   approveRequest,
   cancelRequest,
   createRequest,
+  decideItemCancellation,
   rejectRequest,
+  requestItemCancellation,
   reopenRequest,
   returnToDraft,
   submitRequest,
   updateRequest,
+  withdrawItemCancellation,
   withdrawRequest,
 } from "@/server/requests/service";
 import { requireUser } from "@/server/session";
@@ -112,5 +116,82 @@ export async function cancelAction(_: ActionState, form: FormData): Promise<Acti
     form,
     (u, rid) => cancelRequest(u, rid, reasonOf(form)),
     "მოთხოვნა გაუქმდა.",
+  );
+}
+
+// ─── Item-level: approved quantity and remainder cancellation ────────────────
+
+async function runItemAction(
+  form: FormData,
+  fn: (requestId: string) => Promise<unknown>,
+  message: string,
+) {
+  let requestId = "";
+  const state = await runAction(async () => {
+    requestId = formId(form, "requestId");
+    await fn(requestId);
+    return message;
+  });
+  if (state.ok) {
+    revalidatePath(`/requests/${requestId}`);
+    revalidatePath("/requests");
+    revalidatePath("/orders");
+    revalidatePath("/");
+  }
+  return state;
+}
+
+export async function adjustItemAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  return runItemAction(
+    form,
+    (rid) =>
+      adjustApprovedQuantity(user, rid, {
+        itemId: formId(form, "itemId"),
+        quantity: String(form.get("quantity") ?? ""),
+        reason: reasonOf(form),
+      }),
+    "დამტკიცებული რაოდენობა შეიცვალა.",
+  );
+}
+
+export async function askItemCancelAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  return runItemAction(
+    form,
+    (rid) =>
+      requestItemCancellation(user, rid, {
+        itemId: formId(form, "itemId"),
+        reason: reasonOf(form),
+      }),
+    "გაუქმების მოთხოვნა გაიგზავნა. გაუქმდება მეორე მხარის დადასტურების შემდეგ.",
+  );
+}
+
+export async function decideItemCancelAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  const decision = form.get("decision") === "confirm" ? "confirm" : "reject";
+  return runItemAction(
+    form,
+    (rid) =>
+      decideItemCancellation(user, rid, {
+        cancellationId: formId(form, "cancellationId"),
+        decision,
+        reason: reasonOf(form),
+      }),
+    decision === "confirm" ? "გაუქმება დადასტურდა." : "გაუქმება უარყოფილია.",
+  );
+}
+
+export async function withdrawItemCancelAction(
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const user = await requireUser();
+  return runItemAction(
+    form,
+    (rid) =>
+      withdrawItemCancellation(user, rid, { cancellationId: formId(form, "cancellationId") }),
+    "გაუქმების მოთხოვნა გაწვეულია.",
   );
 }

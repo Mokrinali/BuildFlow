@@ -107,12 +107,21 @@ async function lockOrderForReceipt(tx: Tx, actor: Actor, orderId: string) {
 async function orderItemProgress(tx: Tx, orderId: string) {
   const items = await tx.orderItem.findMany({
     where: { orderId },
-    select: { id: true, quantity: true, receiptItems: { select: { quantity: true } } },
+    select: {
+      id: true,
+      quantity: true,
+      closedAt: true,
+      receiptItems: { select: { quantity: true } },
+    },
   });
   return new Map(
     items.map((it) => [
       it.id,
-      { ordered: it.quantity, received: sumDecimals(it.receiptItems.map((r) => r.quantity)) },
+      {
+        ordered: it.quantity,
+        received: sumDecimals(it.receiptItems.map((r) => r.quantity)),
+        closed: it.closedAt !== null,
+      },
     ]),
   );
 }
@@ -141,13 +150,20 @@ export async function createReceipt(actor: Actor, raw: unknown) {
     input.items.forEach((it, i) => {
       const p = progress.get(it.orderItemId);
       if (!p) throw new AppError("VALIDATION", errors.receiptItemForeign);
-      if (p.received.plus(it.quantity).gt(p.ordered)) {
+      if (p.closed) {
+        fieldErrors[`items.${i}.quantity`] = errors.receiptLineClosed;
+      } else if (p.received.plus(it.quantity).gt(p.ordered)) {
         fieldErrors[`items.${i}.quantity`] =
           `${errors.overReceipt} დარჩენილია ${p.ordered.minus(p.received).toString()}.`;
       }
     });
     if (Object.keys(fieldErrors).length > 0) {
-      throw new AppError("CONFLICT", errors.overReceipt, fieldErrors);
+      const onlyClosed = Object.values(fieldErrors).every((m) => m === errors.receiptLineClosed);
+      throw new AppError(
+        "CONFLICT",
+        onlyClosed ? errors.receiptLineClosed : errors.overReceipt,
+        fieldErrors,
+      );
     }
 
     const receipt = await tx.receipt.create({
@@ -221,6 +237,12 @@ export async function correctReceiptItem(actor: Actor, receiptItemId: string, ra
     if (newNet.isNegative()) {
       throw new AppError("CONFLICT", errors.correctionNegative, {
         quantity: errors.correctionNegative,
+      });
+    }
+    // A closed line counts as ordered up to what was received: raising it would over-order.
+    if (p.closed && delta.gt(0)) {
+      throw new AppError("CONFLICT", errors.correctionClosedIncrease, {
+        quantity: errors.correctionClosedIncrease,
       });
     }
     if (newNet.gt(p.ordered)) {

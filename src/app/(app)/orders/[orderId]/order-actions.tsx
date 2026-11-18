@@ -5,7 +5,13 @@ import { Button, Card, FormMessage } from "@/components/ui";
 import { submitKeepingValues } from "@/components/keep-values";
 import { formatQuantity } from "@/lib/format";
 import { initialActionState } from "@/server/action-state";
-import { cancelOrderAction, correctReceiptAction, createReceiptAction } from "../actions";
+import type { ActionState } from "@/server/action-state";
+import {
+  cancelOrderAction,
+  closeOrderAction,
+  correctReceiptAction,
+  createReceiptAction,
+} from "../actions";
 
 const inputClass =
   "min-h-10 w-full rounded-md border border-steel bg-white px-3 text-base text-navy aria-invalid:border-red-700";
@@ -164,20 +170,63 @@ export function ReceiveForm({
   );
 }
 
+type OrderFormAction = (state: ActionState, form: FormData) => Promise<ActionState>;
+
 export function CancelOrderForm({ orderId }: { orderId: string }) {
-  const [state, action, pending] = useActionState(cancelOrderAction, initialActionState);
+  return (
+    <OrderReasonForm
+      orderId={orderId}
+      action={cancelOrderAction}
+      summary="შეკვეთის გაუქმება"
+      reasonLabel="გაუქმების მიზეზი"
+      submitLabel="შეკვეთის გაუქმება"
+    />
+  );
+}
+
+/** Close short: the supplier delivers no more; the rest returns to the request. */
+export function CloseOrderForm({ orderId }: { orderId: string }) {
+  return (
+    <OrderReasonForm
+      orderId={orderId}
+      action={closeOrderAction}
+      summary="შეკვეთის დახურვა"
+      intro="როცა მომწოდებელი მეტს აღარ მოიტანს. შეკვეთა დასრულდება უკვე მიღებული რაოდენობით, დარჩენილი კი მოთხოვნაში დაბრუნდება — მისი შეკვეთა სხვა მომწოდებელთან ან გაუქმება იქიდან შეიძლება."
+      reasonLabel="მიზეზი (მაგ. მომწოდებელს მეტი არ აქვს)"
+      submitLabel="შეკვეთის დახურვა"
+    />
+  );
+}
+
+function OrderReasonForm({
+  orderId,
+  action: serverAction,
+  summary,
+  intro,
+  reasonLabel,
+  submitLabel,
+}: {
+  orderId: string;
+  action: OrderFormAction;
+  summary: string;
+  intro?: string;
+  reasonLabel: string;
+  submitLabel: string;
+}) {
+  const [state, action, pending] = useActionState(serverAction, initialActionState);
   const id = useId();
   return (
     <details className="rounded-md border border-line bg-white p-3">
-      <summary className="cursor-pointer text-sm font-semibold">შეკვეთის გაუქმება</summary>
+      <summary className="cursor-pointer text-sm font-semibold">{summary}</summary>
       <form
         action={action}
         onSubmit={submitKeepingValues(action)}
         className="mt-3 flex flex-col gap-2"
       >
         <input type="hidden" name="orderId" value={orderId} />
+        {intro && <p className="text-sm text-steel-600">{intro}</p>}
         <label htmlFor={id} className="text-sm font-medium">
-          გაუქმების მიზეზი
+          {reasonLabel}
         </label>
         <textarea
           id={id}
@@ -196,7 +245,7 @@ export function CancelOrderForm({ orderId }: { orderId: string }) {
           </p>
         )}
         <Button type="submit" variant="danger" disabled={pending}>
-          შეკვეთის გაუქმება
+          {submitLabel}
         </Button>
         {!state.fieldErrors && <FormMessage ok={state.ok} message={state.message} />}
       </form>

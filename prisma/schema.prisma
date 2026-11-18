@@ -53,6 +53,18 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum CancellationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  WITHDRAWN
+}
+
+enum CancellationSide {
+  REQUESTER
+  BUYER
+}
+
 enum Currency {
   GEL
   USD
@@ -99,12 +111,14 @@ model User {
   accounts     Account[]
   memberships  ProjectMembership[]
 
-  requestsAuthored PurchaseRequest[] @relation("RequestAuthor")
-  requestsReviewed PurchaseRequest[] @relation("RequestReviewer")
-  ordersCreated    PurchaseOrder[]
-  receipts         Receipt[]
-  events           AuditEvent[]
-  imports          RequestImport[]
+  requestsAuthored       PurchaseRequest[]  @relation("RequestAuthor")
+  requestsReviewed       PurchaseRequest[]  @relation("RequestReviewer")
+  ordersCreated          PurchaseOrder[]
+  receipts               Receipt[]
+  events                 AuditEvent[]
+  imports                RequestImport[]
+  cancellationsRequested ItemCancellation[] @relation("CancellationRequestedBy")
+  cancellationsDecided   ItemCancellation[] @relation("CancellationDecidedBy")
 
   @@index([organizationId])
 }
@@ -236,17 +250,22 @@ model PurchaseRequest {
 }
 
 model RequestItem {
-  id        String  @id @default(cuid())
-  requestId String
-  position  Int
-  name      String
-  spec      String?
-  quantity  Decimal @db.Decimal(14, 3)
-  unit      String
-  note      String?
+  id               String   @id @default(cuid())
+  requestId        String
+  position         Int
+  name             String
+  spec             String?
+  // What the requester asked for.
+  quantity         Decimal  @db.Decimal(14, 3)
+  // What may be ordered, when the buyer changed it (packaging) or a remainder was cancelled.
+  // Null means "as requested".
+  approvedQuantity Decimal? @db.Decimal(14, 3)
+  unit             String
+  note             String?
 
-  request    PurchaseRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  orderItems OrderItem[]
+  request       PurchaseRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+  cancellations ItemCancellation[]
 
   @@unique([requestId, position])
 }
@@ -300,13 +319,17 @@ model PurchaseOrder {
 }
 
 model OrderItem {
-  id            String  @id @default(cuid())
+  id            String    @id @default(cuid())
   orderId       String
   requestItemId String
-  quantity      Decimal @db.Decimal(14, 3)
+  quantity      Decimal   @db.Decimal(14, 3)
   // Per-unit price can need sub-tetri precision; totals are rounded to 2 decimals.
-  unitPrice     Decimal @db.Decimal(14, 4)
+  unitPrice     Decimal   @db.Decimal(14, 4)
   note          String?
+  // Closed short: the supplier delivers no more. The line then counts as ordered only up to
+  // what was received, and the rest returns to the request.
+  closedAt      DateTime? @db.Timestamptz(3)
+  closeReason   String?
 
   order        PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   requestItem  RequestItem   @relation(fields: [requestItemId], references: [id], onDelete: Restrict)
@@ -407,4 +430,29 @@ model AuditEvent {
   @@index([entityType, entityId, seq])
   @@index([organizationId, createdAt])
   @@index([projectId, seq])
+}
+
+// Cancelling the undelivered remainder of a request item needs both sides: the requester side
+// (request author) and the buyer side. One side asks, a different person on the other side
+// confirms or rejects. At most one PENDING row per item (partial unique index in the migration).
+model ItemCancellation {
+  id                String             @id @default(cuid())
+  requestItemId     String
+  status            CancellationStatus @default(PENDING)
+  side              CancellationSide
+  reason            String
+  requestedById     String
+  createdAt         DateTime           @default(now()) @db.Timestamptz(3)
+  decidedById       String?
+  decidedAt         DateTime?          @db.Timestamptz(3)
+  decisionReason    String?
+  // Remainder (approved minus received) when the cancellation was confirmed.
+  cancelledQuantity Decimal?           @db.Decimal(14, 3)
+
+  requestItem RequestItem @relation(fields: [requestItemId], references: [id], onDelete: Cascade)
+  requestedBy User        @relation("CancellationRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy   User?       @relation("CancellationDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@index([requestItemId, status])
+  @@index([status])
 }

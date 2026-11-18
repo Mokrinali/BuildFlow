@@ -18,6 +18,7 @@ import {
   lockRequest,
   recomputeRequestStatus,
   sumDecimals,
+  type LockedRequest,
 } from "@/server/orders/progress";
 import { parseInput } from "@/server/validation";
 
@@ -269,6 +270,92 @@ export async function cancelOrder(actor: Actor, orderId: string, rawReason: unkn
   });
 }
 
+// ─── Close short ─────────────────────────────────────────────────────────────
+
+/**
+ * Close the open lines of an order at what was received (the supplier delivers no more).
+ * The rest returns to the request: it can be ordered again or cancelled there.
+ * Used by the buyer directly, and by a confirmed item cancellation (`requestItemId` given).
+ */
+export async function closeOrderLines(
+  tx: Tx,
+  actor: Actor,
+  req: LockedRequest,
+  where: { orderId?: string; requestItemId?: string },
+  reason: string,
+) {
+  const lines = await tx.orderItem.findMany({
+    where: { ...where, closedAt: null, order: { status: "ACTIVE" } },
+    select: {
+      id: true,
+      orderId: true,
+      requestItemId: true,
+      quantity: true,
+      receiptItems: { select: { quantity: true } },
+    },
+  });
+  const open = lines.filter((l) =>
+    l.quantity.gt(sumDecimals(l.receiptItems.map((r) => r.quantity))),
+  );
+  if (open.length === 0) return 0;
+  const now = new Date();
+  await tx.orderItem.updateMany({
+    where: { id: { in: open.map((l) => l.id) } },
+    data: { closedAt: now, closeReason: reason },
+  });
+  for (const orderId of new Set(open.map((l) => l.orderId))) {
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseOrder",
+      entityId: orderId,
+      projectId: req.projectId,
+      action: "order.closed",
+      reason,
+      changes: {
+        lines: open
+          .filter((l) => l.orderId === orderId)
+          .map((l) => ({
+            orderItemId: l.id,
+            requestItemId: l.requestItemId,
+            ordered: l.quantity.toString(),
+            received: sumDecimals(l.receiptItems.map((r) => r.quantity)).toString(),
+          })),
+      },
+    });
+  }
+  return open.length;
+}
+
+/** Buyer closes an order short with a reason. Something must already have been received. */
+export async function closeOrder(actor: Actor, orderId: string, rawReason: unknown) {
+  const { reason } = parseInput(reasonInput, { reason: rawReason });
+  return db.$transaction(async (tx) => {
+    const found = await tx.purchaseOrder.findUnique({
+      where: { id: orderId },
+      select: { organizationId: true, requestId: true },
+    });
+    if (!found || found.organizationId !== actor.organizationId) throw notFound();
+    const req = await lockRequest(tx, actor, found.requestId);
+    await requireProjectAccess(tx, actor, req.projectId, { requiredRoles: ["BUYER"], write: true });
+    const fresh = await tx.purchaseOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { status: true },
+    });
+    if (fresh.status !== "ACTIVE") throw new AppError("CONFLICT", errors.orderNotActive);
+    const received = await tx.receiptItem.aggregate({
+      where: { orderItem: { orderId } },
+      _sum: { quantity: true },
+    });
+    // Nothing received yet: cancelling the order is the right action, not closing it.
+    if (!received._sum.quantity || received._sum.quantity.lte(0)) {
+      throw new AppError("CONFLICT", errors.orderNothingToClose);
+    }
+    const closed = await closeOrderLines(tx, actor, req, { orderId }, reason);
+    if (closed === 0) throw new AppError("CONFLICT", errors.orderNothingToClose);
+    await recomputeRequestStatus(tx, actor, req);
+    return { requestId: req.id };
+  });
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 /** Data for the "new order" form: what is still available to order per request item. */
@@ -302,7 +389,7 @@ export async function getOrderDraft(actor: Actor, requestId: string) {
       name: it.name,
       spec: it.spec,
       unit: it.unit,
-      approved: it.quantity.toString(),
+      approved: p.approved.toString(),
       ordered: p.ordered.toString(),
       available: (available.isNegative() ? new Prisma.Decimal(0) : available).toString(),
     };
@@ -315,7 +402,13 @@ export async function getOrderDraft(actor: Actor, requestId: string) {
   };
 }
 
-export type OrderPermissions = { canReceive: boolean; canCancel: boolean; canCorrect: boolean };
+export type OrderPermissions = {
+  canReceive: boolean;
+  canCancel: boolean;
+  canCorrect: boolean;
+  /** Close short: the supplier delivers no more; requires something received already. */
+  canClose: boolean;
+};
 
 /** Full order for the details page: items with progress, receipts, history, allowed actions. */
 export async function getOrder(actor: Actor, orderId: string) {
@@ -359,7 +452,8 @@ export async function getOrder(actor: Actor, orderId: string) {
 
   const items = order.items.map((it) => {
     const received = sumDecimals(it.receiptItems.map((r) => r.quantity));
-    const remaining = it.quantity.minus(received);
+    // A closed line expects nothing more.
+    const remaining = it.closedAt ? new Prisma.Decimal(0) : it.quantity.minus(received);
     return {
       id: it.id,
       position: it.requestItem.position,
@@ -372,6 +466,8 @@ export async function getOrder(actor: Actor, orderId: string) {
       total: lineTotal(it.quantity, it.unitPrice).toString(),
       received: received.toString(),
       remaining: (remaining.isNegative() ? new Prisma.Decimal(0) : remaining).toString(),
+      closed: it.closedAt !== null,
+      closeReason: it.closeReason,
     };
   });
   const total = sumDecimals(order.items.map((it) => lineTotal(it.quantity, it.unitPrice)));
@@ -413,6 +509,7 @@ export async function getOrder(actor: Actor, orderId: string) {
     canReceive: active && isReceiver(access) && anyRemaining,
     canCancel: active && isBuyer(access) && !anyReceived,
     canCorrect: active && isReceiver(access) && receipts.length > 0,
+    canClose: active && isBuyer(access) && anyRemaining && anyReceived,
   };
 
   return {
@@ -469,7 +566,7 @@ async function openOrderIds(actor: Actor): Promise<string[]> {
     ) r ON r."orderItemId" = oi."id"
     WHERE o."organizationId" = ${actor.organizationId} AND o."status" = 'ACTIVE' AND ${visible}
     GROUP BY o."id"
-    HAVING bool_or(oi."quantity" > COALESCE(r."received", 0))`;
+    HAVING bool_or(oi."closedAt" IS NULL AND oi."quantity" > COALESCE(r."received", 0))`;
   return rows.map((r) => r.id);
 }
 
@@ -601,6 +698,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
           select: {
             quantity: true,
             unitPrice: true,
+            closedAt: true,
             receiptItems: { select: { quantity: true } },
           },
         },
@@ -612,6 +710,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
       const items = o.items.map((it) => ({
         quantity: it.quantity.toString(),
         received: sumDecimals(it.receiptItems.map((r) => r.quantity)).toString(),
+        closed: it.closedAt !== null,
       }));
       return {
         id: o.id,

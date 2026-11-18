@@ -16,7 +16,7 @@ import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import { AppError } from "@/server/errors";
 import { getOrder } from "@/server/orders/service";
 import { requireUser } from "@/server/session";
-import { CancelOrderForm, CorrectReceiptForm, ReceiveForm } from "./order-actions";
+import { CancelOrderForm, CloseOrderForm, CorrectReceiptForm, ReceiveForm } from "./order-actions";
 
 export const metadata: Metadata = { title: "შეკვეთა" };
 
@@ -131,7 +131,15 @@ export default async function OrderPage({ params, searchParams }: Props) {
                         {formatQuantity(it.quantity)}
                       </td>
                       <td className="py-2 pr-3 text-right">{formatQuantity(it.received)}</td>
-                      <td className="py-2 pr-3 text-right">{formatQuantity(it.remaining)}</td>
+                      <td className="py-2 pr-3 text-right">
+                        {it.closed ? (
+                          <span className="text-steel-600" title={it.closeReason ?? undefined}>
+                            დახურული
+                          </span>
+                        ) : (
+                          formatQuantity(it.remaining)
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-right whitespace-nowrap">
                         {formatUnitPrice(it.unitPrice, order.currency)}
                       </td>
@@ -164,7 +172,9 @@ export default async function OrderPage({ params, searchParams }: Props) {
                     <dt className="text-steel-600">მიღებული</dt>
                     <dd className="text-right">{formatQuantity(it.received)}</dd>
                     <dt className="text-steel-600">დარჩენილი</dt>
-                    <dd className="text-right">{formatQuantity(it.remaining)}</dd>
+                    <dd className="text-right">
+                      {it.closed ? "დახურული" : formatQuantity(it.remaining)}
+                    </dd>
                     <dt className="text-steel-600">ფასი</dt>
                     <dd className="text-right">{formatUnitPrice(it.unitPrice, order.currency)}</dd>
                     <dt className="text-steel-600">თანხა</dt>
@@ -234,6 +244,7 @@ export default async function OrderPage({ params, searchParams }: Props) {
 
         <div className="flex flex-col gap-6">
           {permissions.canCancel && <CancelOrderForm orderId={order.id} />}
+          {permissions.canClose && <CloseOrderForm orderId={order.id} />}
           <Card>
             <h2 className="mb-4 text-lg font-semibold">ქრონოლოგია</h2>
             <ol className="flex flex-col gap-3 text-sm">

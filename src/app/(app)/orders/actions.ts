@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formId, formPayload, runAction, type ActionState } from "@/server/action";
-import { cancelOrder, createOrder } from "@/server/orders/service";
+import { cancelOrder, closeOrder, createOrder } from "@/server/orders/service";
 import { correctReceiptItem, createReceipt } from "@/server/receipts/service";
 import { requireUser } from "@/server/session";
 
@@ -51,6 +51,15 @@ export async function cancelOrderAction(_: ActionState, form: FormData): Promise
     const { requestId } = await cancelOrder(user, orderId, String(form.get("reason") ?? ""));
     return { orderId, requestId };
   }, "შეკვეთა გაუქმდა.");
+}
+
+export async function closeOrderAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  return mutate(async () => {
+    const orderId = formId(form, "orderId");
+    const { requestId } = await closeOrder(user, orderId, String(form.get("reason") ?? ""));
+    return { orderId, requestId };
+  }, "შეკვეთა დაიხურა. დარჩენილი რაოდენობა მოთხოვნაში დაბრუნდა.");
 }
 
 export async function createReceiptAction(_: ActionState, form: FormData): Promise<ActionState> {

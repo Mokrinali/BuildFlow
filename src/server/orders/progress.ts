@@ -30,7 +30,7 @@ export const ORDERABLE: RequestStatus[] = ["APPROVED", "PARTIALLY_ORDERED", "PAR
 
 export type ItemProgress = {
   approved: Prisma.Decimal;
-  /** Sum over ACTIVE orders only. */
+  /** Sum over ACTIVE orders only; a line closed short counts as what was received on it. */
   ordered: Prisma.Decimal;
   /** Net received (corrections included). */
   received: Prisma.Decimal;
@@ -41,8 +41,11 @@ export type ItemProgress = {
  * all received → RECEIVED; any received → PARTIALLY_RECEIVED; all ordered → ORDERED;
  * any ordered → PARTIALLY_ORDERED; otherwise APPROVED.
  */
-export function deriveRequestStatus(items: ItemProgress[]): RequestStatus {
-  if (items.length === 0) return "APPROVED";
+export function deriveRequestStatus(all: ItemProgress[]): RequestStatus {
+  if (all.length === 0) return "APPROVED";
+  // Items whose whole quantity was cancelled (approved 0, nothing received) no longer count.
+  const items = all.filter((i) => i.approved.gt(0) || i.received.gt(0));
+  if (items.length === 0) return "CANCELLED";
   if (items.every((i) => i.received.gte(i.approved))) return "RECEIVED";
   if (items.some((i) => i.received.gt(0))) return "PARTIALLY_RECEIVED";
   if (items.every((i) => i.ordered.gte(i.approved))) return "ORDERED";
@@ -67,6 +70,21 @@ export async function lockRequest(tx: Tx, actor: Actor, requestId: string): Prom
   return req;
 }
 
+/** The quantity that may be ordered: the buyer's change, or what was requested. */
+export const approvedOf = (it: {
+  quantity: Prisma.Decimal;
+  approvedQuantity: Prisma.Decimal | null;
+}) => it.approvedQuantity ?? it.quantity;
+
+/** How much of an order line counts as ordered: all of it, or the received part once closed. */
+export function lineOrdered(line: {
+  quantity: Prisma.Decimal;
+  closedAt: Date | null;
+  received: Prisma.Decimal;
+}) {
+  return line.closedAt ? line.received : line.quantity;
+}
+
 /** Per request item: approved, ordered (active orders) and net received quantities. */
 export async function loadItemProgress(tx: Db | Tx, requestId: string) {
   const items = await tx.requestItem.findMany({
@@ -75,23 +93,30 @@ export async function loadItemProgress(tx: Db | Tx, requestId: string) {
     select: {
       id: true,
       quantity: true,
+      approvedQuantity: true,
       orderItems: {
         select: {
           quantity: true,
+          closedAt: true,
           order: { select: { status: true } },
           receiptItems: { select: { quantity: true } },
         },
       },
     },
   });
-  return items.map((it) => ({
-    id: it.id,
-    approved: it.quantity,
-    ordered: sumDecimals(
-      it.orderItems.filter((o) => o.order.status === "ACTIVE").map((o) => o.quantity),
-    ),
-    received: sumDecimals(it.orderItems.flatMap((o) => o.receiptItems.map((r) => r.quantity))),
-  }));
+  return items.map((it) => {
+    const lines = it.orderItems.map((o) => ({
+      ...o,
+      received: sumDecimals(o.receiptItems.map((r) => r.quantity)),
+    }));
+    return {
+      id: it.id,
+      requested: it.quantity,
+      approved: approvedOf(it),
+      ordered: sumDecimals(lines.filter((o) => o.order.status === "ACTIVE").map(lineOrdered)),
+      received: sumDecimals(lines.map((o) => o.received)),
+    };
+  });
 }
 
 /** Recompute and store the request status after an order or receipt change (request locked). */
@@ -110,14 +135,20 @@ export async function recomputeRequestStatus(tx: Tx, actor: Actor, req: LockedRe
   return next;
 }
 
-/** Delivery progress of one order from its ordered and received quantities. */
+/**
+ * Delivery progress of one order. A line closed short is finished at what was received; an
+ * order whose lines are all finished, at least one of them short, is CLOSED.
+ */
 export function deliveryState(
   status: OrderStatus,
-  items: { quantity: string; received: string }[],
+  items: { quantity: string; received: string; closed?: boolean }[],
 ): DeliveryState {
   if (status === "CANCELLED") return "CANCELLED";
   const rec = items.map((i) => new Prisma.Decimal(i.received));
-  if (items.every((i, k) => rec[k]!.gte(i.quantity))) return "RECEIVED";
+  const full = items.map((i, k) => rec[k]!.gte(i.quantity));
+  if (items.every((i, k) => full[k] || i.closed)) {
+    return items.some((i, k) => i.closed && !full[k]) ? "CLOSED" : "RECEIVED";
+  }
   if (rec.some((r) => r.gt(0))) return "PARTIAL";
   return "AWAITING";
 }

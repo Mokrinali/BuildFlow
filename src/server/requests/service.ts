@@ -4,14 +4,23 @@
 // Order/receipt-driven statuses (PARTIALLY_ORDERED … RECEIVED) are set by the orders module.
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import type { ProjectRole, RequestStatus } from "@/generated/prisma/enums";
+import type { CancellationSide, ProjectRole, RequestStatus } from "@/generated/prisma/enums";
 import { db, type Tx } from "@/lib/db";
 import { parseWorkDate, tbilisiDayStart, todayInTbilisi } from "@/lib/format";
 import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
-import { ORDERABLE, deliveryState, lockRequest } from "@/server/orders/progress";
+import {
+  ORDERABLE,
+  approvedOf,
+  deliveryState,
+  lineOrdered,
+  loadItemProgress,
+  lockRequest,
+  recomputeRequestStatus,
+} from "@/server/orders/progress";
+import { closeOrderLines } from "@/server/orders/service";
 import { AppError, notFound } from "@/server/errors";
 import { parseInput } from "@/server/validation";
 
@@ -439,6 +448,348 @@ export async function cancelRequest(actor: Actor, requestId: string, rawReason: 
   });
 }
 
+// ─── Approved quantity and remainder cancellation ────────────────────────────
+//
+// The buyer can change an item's approved quantity (packaging: 1,5 → 2 t) with a reason.
+// Cancelling the undelivered remainder needs both sides: one side asks, a different person on
+// the other side confirms (the requester side is the request author, the buyer side holds BUYER;
+// admins count as both, but never confirm their own ask).
+
+/** Statuses in which the buyer may change approved quantities. */
+const ADJUSTABLE: RequestStatus[] = [
+  "IN_REVIEW",
+  "APPROVED",
+  "PARTIALLY_ORDERED",
+  "ORDERED",
+  "PARTIALLY_RECEIVED",
+];
+/** Statuses in which a remainder can be cancelled (something approved is still undelivered). */
+const CANCELLABLE: RequestStatus[] = [
+  "APPROVED",
+  "PARTIALLY_ORDERED",
+  "ORDERED",
+  "PARTIALLY_RECEIVED",
+];
+
+const adjustInput = z.object({
+  itemId: z.string().min(1).max(64),
+  quantity: z.union([z.string(), z.number()]).transform((v, ctx) => {
+    const q = normalizeQuantity(v);
+    if (q === null) {
+      ctx.addIssue({ code: "custom", message: "მიუთითეთ რიცხვი (მაქსიმუმ 3 ათწილადი)." });
+      return z.NEVER;
+    }
+    return q;
+  }),
+  reason: reasonInput.shape.reason,
+});
+
+/** Lock the request and load the actor's access for an item-level change. */
+async function lockForItem(tx: Tx, actor: Actor, requestId: string, itemId: string) {
+  const locked = await lockRequest(tx, actor, requestId);
+  const req = await loadForAction(tx, actor, requestId);
+  const access = await requireProjectAccess(tx, actor, req.projectId, { write: true });
+  const item = await tx.requestItem.findUnique({
+    where: { id: itemId },
+    select: { id: true, requestId: true, name: true, quantity: true, approvedQuantity: true },
+  });
+  if (!item || item.requestId !== requestId) {
+    throw new AppError("VALIDATION", errors.requestItemForeign);
+  }
+  return { locked, req, access, item };
+}
+
+/** Buyer changes the approved quantity of one item, with a reason. */
+export async function adjustApprovedQuantity(actor: Actor, requestId: string, raw: unknown) {
+  const input = parseInput(adjustInput, raw);
+  return db.$transaction(async (tx) => {
+    const { locked, req, access, item } = await lockForItem(tx, actor, requestId, input.itemId);
+    if (!isBuyer(access)) throw new AppError("FORBIDDEN", errors.forbidden);
+    if (!ADJUSTABLE.includes(req.status)) throw new AppError("CONFLICT", errors.adjustNotAllowed);
+    if (!isPositiveQuantity(input.quantity)) {
+      throw new AppError("VALIDATION", errors.adjustZero, { quantity: errors.adjustZero });
+    }
+    const next = new Prisma.Decimal(input.quantity);
+    const current = approvedOf(item);
+    if (next.eq(current)) {
+      throw new AppError("VALIDATION", errors.adjustSame, { quantity: errors.adjustSame });
+    }
+    const p = (await loadItemProgress(tx, requestId)).find((x) => x.id === item.id)!;
+    if (next.lt(p.ordered) || next.lt(p.received)) {
+      const min = p.ordered.gt(p.received) ? p.ordered : p.received;
+      throw new AppError("CONFLICT", errors.adjustBelowOrdered, {
+        quantity: `${errors.adjustBelowOrdered} მინიმუმ ${min.toString()}.`,
+      });
+    }
+    await tx.requestItem.update({
+      where: { id: item.id },
+      // Back to "as requested" stores null, so the page does not show a change that is none.
+      data: { approvedQuantity: next.eq(item.quantity) ? null : next },
+    });
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseRequest",
+      entityId: requestId,
+      projectId: req.projectId,
+      action: "request.item_adjusted",
+      reason: input.reason,
+      changes: { itemId: item.id, name: item.name, from: current.toString(), to: next.toString() },
+    });
+    await recomputeRequestStatus(tx, actor, locked);
+  });
+}
+
+const cancelAskInput = z.object({
+  itemId: z.string().min(1).max(64),
+  reason: reasonInput.shape.reason,
+});
+
+/** One side asks to cancel the undelivered remainder of an item. */
+export async function requestItemCancellation(actor: Actor, requestId: string, raw: unknown) {
+  const input = parseInput(cancelAskInput, raw);
+  return db.$transaction(async (tx) => {
+    const { req, access, item } = await lockForItem(tx, actor, requestId, input.itemId);
+    const requesterSide = isAuthor(actor, req, access);
+    if (!requesterSide && !isBuyer(access)) throw new AppError("FORBIDDEN", errors.forbidden);
+    if (!CANCELLABLE.includes(req.status)) throw new AppError("CONFLICT", errors.cancelNotAllowed);
+    const p = (await loadItemProgress(tx, requestId)).find((x) => x.id === item.id)!;
+    if (!p.approved.gt(p.received)) throw new AppError("CONFLICT", errors.cancelNothingLeft);
+    const pending = await tx.itemCancellation.count({
+      where: { requestItemId: item.id, status: "PENDING" },
+    });
+    if (pending > 0) throw new AppError("CONFLICT", errors.cancelPendingExists);
+    // The request author asks as the requester side, even if they also hold BUYER.
+    const side: CancellationSide =
+      req.authorId === actor.userId || !isBuyer(access) ? "REQUESTER" : "BUYER";
+    const created = await tx.itemCancellation.create({
+      data: { requestItemId: item.id, side, reason: input.reason, requestedById: actor.userId },
+      select: { id: true },
+    });
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseRequest",
+      entityId: requestId,
+      projectId: req.projectId,
+      action: "request.cancel_requested",
+      reason: input.reason,
+      changes: {
+        cancellationId: created.id,
+        itemId: item.id,
+        name: item.name,
+        side,
+        remainder: p.approved.minus(p.received).toString(),
+      },
+    });
+    return created;
+  });
+}
+
+const decideInput = z.object({
+  cancellationId: z.string().min(1).max(64),
+  decision: z.enum(["confirm", "reject"]),
+  reason: z.string().trim().max(1000, "მაქსიმუმ 1000 სიმბოლო.").optional().default(""),
+});
+
+/**
+ * The other side confirms or rejects a pending cancellation. On confirm, open order lines of
+ * the item are closed at what was received and the approved quantity drops to the received
+ * quantity, so nothing more is ordered or delivered for it.
+ */
+export async function decideItemCancellation(actor: Actor, requestId: string, raw: unknown) {
+  const input = parseInput(decideInput, raw);
+  if (input.decision === "reject" && input.reason.length < 3) {
+    throw new AppError("VALIDATION", errors.reasonRequired, { reason: errors.reasonRequired });
+  }
+  return db.$transaction(async (tx) => {
+    const found = await tx.itemCancellation.findUnique({
+      where: { id: input.cancellationId },
+      select: { requestItemId: true },
+    });
+    if (!found) throw notFound();
+    const { locked, req, access, item } = await lockForItem(
+      tx,
+      actor,
+      requestId,
+      found.requestItemId,
+    );
+    const c = await tx.itemCancellation.findUniqueOrThrow({
+      where: { id: input.cancellationId },
+      select: { id: true, status: true, side: true, reason: true, requestedById: true },
+    });
+    if (c.status !== "PENDING") throw new AppError("CONFLICT", errors.cancelNotPending);
+    if (c.requestedById === actor.userId) {
+      throw new AppError("FORBIDDEN", errors.cancelOwnDecision);
+    }
+    const otherSide = c.side === "REQUESTER" ? isBuyer(access) : isAuthor(actor, req, access);
+    if (!otherSide) throw new AppError("FORBIDDEN", errors.cancelWrongSide);
+
+    if (input.decision === "reject") {
+      await tx.itemCancellation.update({
+        where: { id: c.id },
+        data: {
+          status: "REJECTED",
+          decidedById: actor.userId,
+          decidedAt: new Date(),
+          decisionReason: input.reason,
+        },
+      });
+      await recordEvent(tx, actor, {
+        entityType: "PurchaseRequest",
+        entityId: requestId,
+        projectId: req.projectId,
+        action: "request.cancel_rejected",
+        reason: input.reason,
+        changes: { cancellationId: c.id, itemId: item.id, name: item.name },
+      });
+      return { status: "REJECTED" as const };
+    }
+
+    await closeOrderLines(tx, actor, locked, { requestItemId: item.id }, c.reason);
+    const p = (await loadItemProgress(tx, requestId)).find((x) => x.id === item.id)!;
+    const cancelled = p.approved.minus(p.received);
+    await tx.requestItem.update({
+      where: { id: item.id },
+      data: { approvedQuantity: p.received },
+    });
+    await tx.itemCancellation.update({
+      where: { id: c.id },
+      data: {
+        status: "CONFIRMED",
+        decidedById: actor.userId,
+        decidedAt: new Date(),
+        decisionReason: input.reason || null,
+        cancelledQuantity: cancelled.isNegative() ? new Prisma.Decimal(0) : cancelled,
+      },
+    });
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseRequest",
+      entityId: requestId,
+      projectId: req.projectId,
+      action: "request.cancel_confirmed",
+      reason: c.reason,
+      changes: {
+        cancellationId: c.id,
+        itemId: item.id,
+        name: item.name,
+        cancelled: cancelled.toString(),
+        decisionReason: input.reason || null,
+      },
+    });
+    const status = await recomputeRequestStatus(tx, actor, locked);
+    // Everything cancelled before anything arrived: the request itself ends as cancelled.
+    if (status === "CANCELLED") {
+      await tx.purchaseRequest.update({
+        where: { id: requestId },
+        data: { cancelReason: c.reason },
+      });
+    }
+    return { status: "CONFIRMED" as const };
+  });
+}
+
+/** The asker withdraws their own pending cancellation. */
+export async function withdrawItemCancellation(actor: Actor, requestId: string, raw: unknown) {
+  const { cancellationId } = parseInput(
+    z.object({ cancellationId: z.string().min(1).max(64) }),
+    raw,
+  );
+  return db.$transaction(async (tx) => {
+    const found = await tx.itemCancellation.findUnique({
+      where: { id: cancellationId },
+      select: { requestItemId: true },
+    });
+    if (!found) throw notFound();
+    const { req, item } = await lockForItem(tx, actor, requestId, found.requestItemId);
+    const c = await tx.itemCancellation.findUniqueOrThrow({
+      where: { id: cancellationId },
+      select: { status: true, requestedById: true },
+    });
+    if (c.status !== "PENDING") throw new AppError("CONFLICT", errors.cancelNotPending);
+    if (c.requestedById !== actor.userId) throw new AppError("FORBIDDEN", errors.forbidden);
+    await tx.itemCancellation.update({
+      where: { id: cancellationId },
+      data: { status: "WITHDRAWN", decidedById: actor.userId, decidedAt: new Date() },
+    });
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseRequest",
+      entityId: requestId,
+      projectId: req.projectId,
+      action: "request.cancel_withdrawn",
+      changes: { cancellationId, itemId: item.id, name: item.name },
+    });
+  });
+}
+
+/** Pending cancellations the actor can decide (for the dashboard). */
+export async function cancellationsToDecide(actor: Actor) {
+  const rows = await db.itemCancellation.findMany({
+    where: {
+      status: "PENDING",
+      requestedById: { not: actor.userId },
+      requestItem: {
+        request: {
+          organizationId: actor.organizationId,
+          project: {
+            status: "ACTIVE",
+            ...(actor.isAdmin ? {} : { memberships: { some: { userId: actor.userId } } }),
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+    select: {
+      id: true,
+      side: true,
+      reason: true,
+      createdAt: true,
+      requestedBy: { select: { name: true } },
+      requestItem: {
+        select: {
+          name: true,
+          request: {
+            select: {
+              id: true,
+              number: true,
+              authorId: true,
+              projectId: true,
+              project: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  const buyerProjects = actor.isAdmin
+    ? null
+    : new Set(
+        (
+          await db.projectMembership.findMany({
+            where: { userId: actor.userId, roles: { has: "BUYER" } },
+            select: { projectId: true },
+          })
+        ).map((m) => m.projectId),
+      );
+  return rows
+    .filter((r) => {
+      const req = r.requestItem.request;
+      const buyer = buyerProjects === null || buyerProjects.has(req.projectId);
+      const requester = actor.isAdmin || req.authorId === actor.userId;
+      return r.side === "REQUESTER" ? buyer : requester;
+    })
+    .map((r) => ({
+      id: r.id,
+      side: r.side,
+      reason: r.reason,
+      createdAt: r.createdAt,
+      requestedBy: r.requestedBy.name,
+      itemName: r.requestItem.name,
+      request: {
+        id: r.requestItem.request.id,
+        number: r.requestItem.request.number,
+        projectName: r.requestItem.request.project.name,
+      },
+    }));
+}
+
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export type RequestPermissions = {
@@ -505,8 +856,20 @@ export async function getRequest(actor: Actor, requestId: string) {
           orderItems: {
             select: {
               quantity: true,
+              closedAt: true,
               order: { select: { status: true } },
               receiptItems: { select: { quantity: true } },
+            },
+          },
+          cancellations: {
+            where: { status: "PENDING" },
+            select: {
+              id: true,
+              side: true,
+              reason: true,
+              createdAt: true,
+              requestedById: true,
+              requestedBy: { select: { name: true } },
             },
           },
         },
@@ -524,6 +887,7 @@ export async function getRequest(actor: Actor, requestId: string) {
             select: {
               quantity: true,
               unitPrice: true,
+              closedAt: true,
               receiptItems: { select: { quantity: true } },
             },
           },
@@ -534,11 +898,18 @@ export async function getRequest(actor: Actor, requestId: string) {
   if (!req || req.organizationId !== actor.organizationId) throw notFound();
   const access = await requireProjectAccess(db, actor, req.projectId);
 
+  const buyerSide = isBuyer(access) && !access.archived;
+  const requesterSide = isAuthor(actor, req, access) && !access.archived;
   const items = req.items.map((it) => {
-    const active = it.orderItems.filter((o) => o.order.status === "ACTIVE");
-    const ordered = sum(active.map((o) => o.quantity));
-    const received = sum(it.orderItems.flatMap((o) => o.receiptItems.map((r) => r.quantity)));
-    const remaining = it.quantity.minus(received);
+    const lines = it.orderItems.map((o) => ({
+      ...o,
+      received: sum(o.receiptItems.map((r) => r.quantity)),
+    }));
+    const ordered = sum(lines.filter((o) => o.order.status === "ACTIVE").map(lineOrdered));
+    const received = sum(lines.map((o) => o.received));
+    const approved = approvedOf(it);
+    const remaining = approved.minus(received);
+    const pending = it.cancellations[0];
     return {
       id: it.id,
       position: it.position,
@@ -547,9 +918,30 @@ export async function getRequest(actor: Actor, requestId: string) {
       unit: it.unit,
       note: it.note,
       quantity: it.quantity.toString(),
+      approved: approved.toString(),
+      changed: it.approvedQuantity !== null && !it.approvedQuantity.eq(it.quantity),
       ordered: ordered.toString(),
       received: received.toString(),
       remaining: (remaining.isNegative() ? new Prisma.Decimal(0) : remaining).toString(),
+      pendingCancellation: pending
+        ? {
+            id: pending.id,
+            side: pending.side,
+            reason: pending.reason,
+            createdAt: pending.createdAt,
+            requestedBy: pending.requestedBy.name,
+            canDecide:
+              pending.requestedById !== actor.userId &&
+              (pending.side === "REQUESTER" ? buyerSide : requesterSide),
+            canWithdraw: pending.requestedById === actor.userId && !access.archived,
+          }
+        : null,
+      canAdjust: buyerSide && ADJUSTABLE.includes(req.status),
+      canRequestCancel:
+        (buyerSide || requesterSide) &&
+        CANCELLABLE.includes(req.status) &&
+        !pending &&
+        remaining.gt(0),
     };
   });
 
@@ -560,6 +952,7 @@ export async function getRequest(actor: Actor, requestId: string) {
       lines.map((l) => ({
         quantity: l.quantity.toString(),
         received: sum(l.receiptItems.map((r) => r.quantity)).toString(),
+        closed: l.closedAt !== null,
       })),
     ),
     total: sum(
@@ -612,7 +1005,7 @@ export async function getRequest(actor: Actor, requestId: string) {
     access,
     permissions: permissionsFor(actor, req, access, {
       hasOrders: orders.length > 0,
-      anyToOrder: items.some((i) => new Prisma.Decimal(i.quantity).gt(i.ordered)),
+      anyToOrder: items.some((i) => new Prisma.Decimal(i.approved).gt(i.ordered)),
     }),
   };
 }

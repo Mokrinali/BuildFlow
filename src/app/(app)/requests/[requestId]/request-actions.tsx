@@ -119,7 +119,8 @@ export function RequestActions({
   submittedAt: string;
   permissions: RequestPermissions;
 }) {
-  const any = Object.values(p).some(Boolean);
+  // Ordering and editing are links in the page header, not actions in this card.
+  const any = Object.entries(p).some(([k, v]) => v && k !== "canOrder" && k !== "canEdit");
   if (!any) return null;
 
   return (
