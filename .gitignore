@@ -38,3 +38,6 @@ Thumbs.db
 # logo drafts awaiting approval
 branding/_review/
 src/generated/
+
+# Video guide working files (audio, recordings, renders)
+docs/video-guide/build/
