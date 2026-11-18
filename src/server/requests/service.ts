@@ -18,6 +18,7 @@ import {
   lineOrdered,
   loadItemProgress,
   lockRequest,
+  missingWaybillOrderIds,
   recomputeRequestStatus,
 } from "@/server/orders/progress";
 import { closeOrderLines } from "@/server/orders/service";
@@ -945,6 +946,14 @@ export async function getRequest(actor: Actor, requestId: string) {
     };
   });
 
+  const missing = new Set(
+    req.orders.length
+      ? await missingWaybillOrderIds(
+          db,
+          Prisma.sql`o."id" IN (${Prisma.join(req.orders.map((o) => o.id))})`,
+        )
+      : [],
+  );
   const orders = req.orders.map(({ items: lines, ...o }) => ({
     ...o,
     delivery: deliveryState(
@@ -954,6 +963,7 @@ export async function getRequest(actor: Actor, requestId: string) {
         received: sum(l.receiptItems.map((r) => r.quantity)).toString(),
         closed: l.closedAt !== null,
       })),
+      missing.has(o.id),
     ),
     total: sum(
       lines.map((l) =>
@@ -1018,6 +1028,7 @@ const statusValues = [
   "PARTIALLY_ORDERED",
   "ORDERED",
   "PARTIALLY_RECEIVED",
+  "AWAITING_WAYBILL",
   "RECEIVED",
   "CANCELLED",
 ] as const;
@@ -1028,6 +1039,7 @@ const OPEN_STATUSES: RequestStatus[] = [
   "PARTIALLY_ORDERED",
   "ORDERED",
   "PARTIALLY_RECEIVED",
+  "AWAITING_WAYBILL",
 ];
 
 /** URL filters for the request list (unknown or invalid values are ignored). */

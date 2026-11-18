@@ -41,10 +41,40 @@ const receivedOnField = z
     return d;
   });
 
+/** Waybill number: digits, Latin letters, "-" and "/" (RS.ge numbers are digits). */
+export const waybillNumberField = z
+  .string()
+  .trim()
+  .max(40, "მაქსიმუმ 40 სიმბოლო.")
+  .regex(/^[0-9A-Za-z/-]*$/, "ზედნადების ნომერში დასაშვებია ციფრები, ლათინური ასოები, „-“ და „/“.")
+  .optional()
+  .transform((v) => v || null);
+
+/** Waybill date: optional, a real calendar date, not in the future. */
+export const waybillDateField = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    const d = parseWorkDate(v);
+    if (!d) {
+      ctx.addIssue({ code: "custom", message: "თარიღის ფორმატი არასწორია." });
+      return z.NEVER;
+    }
+    if (v > todayInTbilisi()) {
+      ctx.addIssue({ code: "custom", message: "ზედნადების თარიღი მომავალშია." });
+      return z.NEVER;
+    }
+    return d;
+  });
+
 export const createReceiptInput = z.object({
   orderId: z.string().min(1).max(64),
   receivedOn: receivedOnField,
   note: optionalText(1000),
+  waybillNumber: waybillNumberField,
+  waybillDate: waybillDateField,
   items: z
     .array(
       z.object({
@@ -172,6 +202,8 @@ export async function createReceipt(actor: Actor, raw: unknown) {
         receivedOn: input.receivedOn,
         receivedById: actor.userId,
         note: input.note,
+        waybillNumber: input.waybillNumber,
+        waybillDate: input.waybillNumber ? input.waybillDate : null,
         items: {
           create: input.items.map((it) => ({
             orderItemId: it.orderItemId,
@@ -190,6 +222,7 @@ export async function createReceipt(actor: Actor, raw: unknown) {
       changes: {
         receiptId: receipt.id,
         receivedOn: input.receivedOn.toISOString().slice(0, 10),
+        waybillNumber: input.waybillNumber,
         items: input.items.map((it) => ({ orderItemId: it.orderItemId, quantity: it.quantity })),
       },
     });
@@ -284,5 +317,75 @@ export async function correctReceiptItem(actor: Actor, receiptItemId: string, ra
     });
     await recomputeRequestStatus(tx, actor, req);
     return { id: receipt.id, orderId, requestId: req.id };
+  });
+}
+
+// ─── Waybill ─────────────────────────────────────────────────────────────────
+
+export const setWaybillInput = z.object({
+  waybillNumber: waybillNumberField.refine((v) => v !== null, "მიუთითეთ ზედნადების ნომერი."),
+  waybillDate: waybillDateField,
+  reason: z.string().trim().max(1000, "მაქსიმუმ 1000 სიმბოლო.").optional().default(""),
+});
+
+/**
+ * Add or change the waybill of a delivery (later, when the supplier issues it). Receivers and
+ * buyers may do it, also after the order is finished. Changing an existing waybill needs a reason.
+ */
+export async function setReceiptWaybill(actor: Actor, receiptId: string, raw: unknown) {
+  const input = parseInput(setWaybillInput, raw);
+  return db.$transaction(async (tx) => {
+    const receipt = await tx.receipt.findUnique({
+      where: { id: receiptId },
+      select: {
+        id: true,
+        orderId: true,
+        waybillNumber: true,
+        waybillDate: true,
+        items: { select: { correctsId: true } },
+        order: { select: { organizationId: true, requestId: true, status: true } },
+      },
+    });
+    if (!receipt || receipt.order.organizationId !== actor.organizationId) throw notFound();
+    if (receipt.items.every((i) => i.correctsId !== null)) {
+      throw new AppError("VALIDATION", errors.waybillOnCorrection);
+    }
+    const req = await lockRequest(tx, actor, receipt.order.requestId);
+    await requireProjectAccess(tx, actor, req.projectId, {
+      requiredRoles: ["RECEIVER", "BUYER"],
+      write: true,
+    });
+    if (receipt.order.status !== "ACTIVE") throw new AppError("CONFLICT", errors.orderNotActive);
+    const number = input.waybillNumber!;
+    const sameDate =
+      (receipt.waybillDate?.getTime() ?? null) === (input.waybillDate?.getTime() ?? null);
+    if (receipt.waybillNumber === number && sameDate) {
+      throw new AppError("VALIDATION", errors.waybillSame, { waybillNumber: errors.waybillSame });
+    }
+    const changing = !!receipt.waybillNumber;
+    if (changing && input.reason.length < 3) {
+      throw new AppError("VALIDATION", errors.waybillChangeReason, {
+        reason: errors.waybillChangeReason,
+      });
+    }
+    await tx.receipt.update({
+      where: { id: receipt.id },
+      data: { waybillNumber: number, waybillDate: input.waybillDate },
+    });
+    await recordEvent(tx, actor, {
+      entityType: "PurchaseOrder",
+      entityId: receipt.orderId,
+      projectId: req.projectId,
+      action: changing ? "receipt.waybill_changed" : "receipt.waybill_set",
+      reason: changing ? input.reason : null,
+      changes: {
+        receiptId: receipt.id,
+        from: receipt.waybillNumber,
+        to: number,
+        waybillDate: input.waybillDate?.toISOString().slice(0, 10) ?? null,
+      },
+    });
+    await recomputeRequestStatus(tx, actor, req);
+    return { orderId: receipt.orderId, requestId: req.id };
   });
 }

@@ -16,6 +16,7 @@ import {
   deliveryState,
   loadItemProgress,
   lockRequest,
+  missingWaybillOrderIds,
   recomputeRequestStatus,
   sumDecimals,
   type LockedRequest,
@@ -82,6 +83,18 @@ export const createOrderInput = z.object({
   supplierName: optionalText(200),
   currency: z.enum(CURRENCIES).default("GEL"),
   plannedDeliveryDate: workDateField,
+  supplierTaxId: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v) return null;
+      if (!/^\d{9}$|^\d{11}$/.test(v)) {
+        ctx.addIssue({ code: "custom", message: errors.taxIdFormat });
+        return z.NEVER;
+      }
+      return v;
+    }),
   items: z
     .array(
       z.object({
@@ -143,7 +156,7 @@ export async function createOrder(actor: Actor, raw: unknown) {
 
     const supplierId = input.supplierId
       ? await existingSupplier(tx, actor, input.supplierId)
-      : await findOrCreateSupplier(tx, actor, input.supplierName!);
+      : await findOrCreateSupplier(tx, actor, input.supplierName!, input.supplierTaxId);
 
     const org = await tx.organization.update({
       where: { id: actor.organizationId },
@@ -206,7 +219,12 @@ async function existingSupplier(tx: Tx, actor: Actor, supplierId: string) {
 }
 
 /** Suppliers are unique by name within the organization; reuse an existing one. */
-async function findOrCreateSupplier(tx: Tx, actor: Actor, name: string) {
+async function findOrCreateSupplier(
+  tx: Tx,
+  actor: Actor,
+  name: string,
+  taxId: string | null = null,
+) {
   const existing = await tx.supplier.findFirst({
     // Case-insensitive "equals" compiles to ILIKE: escape its wildcards so "A_B" matches only
     // "A_B" (and not "AXB").
@@ -219,7 +237,7 @@ async function findOrCreateSupplier(tx: Tx, actor: Actor, name: string) {
   if (existing) return existing.id;
   const created = await tx.supplier.upsert({
     where: { organizationId_name: { organizationId: actor.organizationId, name } },
-    create: { organizationId: actor.organizationId, name },
+    create: { organizationId: actor.organizationId, name, taxId },
     update: {},
     select: { id: true },
   });
@@ -227,7 +245,7 @@ async function findOrCreateSupplier(tx: Tx, actor: Actor, name: string) {
     entityType: "Supplier",
     entityId: created.id,
     action: "supplier.created",
-    changes: { name },
+    changes: { name, taxId },
   });
   return created.id;
 }
@@ -267,6 +285,44 @@ export async function cancelOrder(actor: Actor, orderId: string, rawReason: unkn
     });
     await recomputeRequestStatus(tx, actor, req);
     return { requestId: req.id };
+  });
+}
+
+// ─── Supplier tax id ─────────────────────────────────────────────────────────
+
+const taxIdInput = z.object({
+  taxId: z
+    .string()
+    .trim()
+    .regex(/^\d{9}$|^\d{11}$/, errors.taxIdFormat),
+});
+
+/** Set a supplier's identification code (needed to match waybills, e.g. with RS.ge later). */
+export async function setSupplierTaxId(actor: Actor, supplierId: string, raw: unknown) {
+  const { taxId } = parseInput(taxIdInput, raw);
+  if (!actor.isAdmin) {
+    const buyer = await db.projectMembership.count({
+      where: {
+        userId: actor.userId,
+        roles: { has: "BUYER" },
+        project: { organizationId: actor.organizationId },
+      },
+    });
+    if (buyer === 0) throw new AppError("FORBIDDEN", errors.forbidden);
+  }
+  return db.$transaction(async (tx) => {
+    const supplier = await tx.supplier.findUnique({
+      where: { id: supplierId },
+      select: { id: true, organizationId: true, taxId: true },
+    });
+    if (!supplier || supplier.organizationId !== actor.organizationId) throw notFound();
+    await tx.supplier.update({ where: { id: supplierId }, data: { taxId } });
+    await recordEvent(tx, actor, {
+      entityType: "Supplier",
+      entityId: supplierId,
+      action: "supplier.tax_id_set",
+      changes: { from: supplier.taxId, to: taxId },
+    });
   });
 }
 
@@ -403,6 +459,10 @@ export async function getOrderDraft(actor: Actor, requestId: string) {
 }
 
 export type OrderPermissions = {
+  /** Add or change a delivery's waybill (receivers and buyers, also after receiving). */
+  canEditWaybill: boolean;
+  /** Set the supplier's identification code. */
+  canEditSupplier: boolean;
   canReceive: boolean;
   canCancel: boolean;
   canCorrect: boolean;
@@ -415,7 +475,7 @@ export async function getOrder(actor: Actor, orderId: string) {
   const order = await db.purchaseOrder.findUnique({
     where: { id: orderId },
     include: {
-      supplier: { select: { id: true, name: true, phone: true } },
+      supplier: { select: { id: true, name: true, phone: true, taxId: true } },
       createdBy: { select: { name: true } },
       request: {
         select: {
@@ -474,12 +534,36 @@ export async function getOrder(actor: Actor, orderId: string) {
   const anyRemaining = items.some((i) => new Prisma.Decimal(i.remaining).gt(0));
   const anyReceived = items.some((i) => new Prisma.Decimal(i.received).gt(0));
 
+  const waybillMissing =
+    (await missingWaybillOrderIds(db, Prisma.sql`o."id" = ${order.id}`)).length > 0;
+  // Other deliveries with the same waybill number from this supplier (one waybill can cover
+  // several orders; shown so a double entry is noticed).
+  const numbers = [
+    ...new Set(order.receipts.map((r) => r.waybillNumber).filter(Boolean)),
+  ] as string[];
+  const shared = numbers.length
+    ? await db.receipt.findMany({
+        where: {
+          waybillNumber: { in: numbers },
+          orderId: { not: order.id },
+          order: { supplierId: order.supplierId, organizationId: actor.organizationId },
+        },
+        select: { waybillNumber: true, order: { select: { id: true, number: true } } },
+      })
+    : [];
   const receipts = order.receipts.map((r) => ({
     id: r.id,
     receivedOn: r.receivedOn,
     createdAt: r.createdAt,
     note: r.note,
     receivedBy: r.receivedBy.name,
+    waybillNumber: r.waybillNumber,
+    waybillDate: r.waybillDate,
+    isCorrectionOnly: r.items.every((ri) => ri.correctsId !== null),
+    alsoOn: shared
+      .filter((x) => x.waybillNumber === r.waybillNumber)
+      .map((x) => x.order)
+      .filter((o, i, all) => all.findIndex((y) => y.id === o.id) === i),
     items: r.items.map((ri) => ({
       id: ri.id,
       name: ri.orderItem.requestItem.name,
@@ -510,6 +594,8 @@ export async function getOrder(actor: Actor, orderId: string) {
     canCancel: active && isBuyer(access) && !anyReceived,
     canCorrect: active && isReceiver(access) && receipts.length > 0,
     canClose: active && isBuyer(access) && anyRemaining && anyReceived,
+    canEditWaybill: active && (isReceiver(access) || isBuyer(access)),
+    canEditSupplier: !access.archived && isBuyer(access),
   };
 
   return {
@@ -525,7 +611,8 @@ export async function getOrder(actor: Actor, orderId: string) {
       supplier: order.supplier,
       request: order.request,
       total: total.toString(),
-      delivery: deliveryState(order.status, items),
+      delivery: deliveryState(order.status, items, waybillMissing),
+      waybillMissing,
     },
     items,
     receipts,
@@ -544,7 +631,10 @@ export const orderFiltersSchema = z.object({
   from: z.string().optional().catch(undefined),
   to: z.string().optional().catch(undefined),
   // Delivery progress: open = something left to receive; overdue = open and planned date passed.
-  delivery: z.enum(["open", "overdue", "received", "cancelled"]).optional().catch(undefined),
+  delivery: z
+    .enum(["open", "overdue", "received", "waybill", "cancelled"])
+    .optional()
+    .catch(undefined),
   page: z.coerce.number().int().min(1).max(10_000).optional().catch(undefined),
 });
 export type OrderFilters = z.output<typeof orderFiltersSchema>;
@@ -607,6 +697,16 @@ export async function orderDashboard(actor: Actor) {
       ...o,
       canReceive: receiverProjects === null || receiverProjects.has(o.request.project.id),
     }));
+  const waybillWhere = { id: { in: await waybillMissingIds(actor) } };
+  const [waybillCount, waybill] = await Promise.all([
+    db.purchaseOrder.count({ where: waybillWhere }),
+    db.purchaseOrder.findMany({
+      where: waybillWhere,
+      orderBy: { number: "asc" },
+      take: 5,
+      select: dashboardOrderSelect,
+    }),
+  ]);
   const [overdueCount, toReceiveCount, overdue, toReceive] = await Promise.all([
     db.purchaseOrder.count({ where: overdueWhere }),
     db.purchaseOrder.count({ where: openWhere }),
@@ -628,6 +728,8 @@ export async function orderDashboard(actor: Actor) {
     overdue: withAction(overdue),
     toReceiveCount,
     toReceive: withAction(toReceive),
+    waybillCount,
+    waybill,
   };
 }
 
@@ -640,8 +742,23 @@ function visibleOrdersWhere(actor: Actor): Prisma.PurchaseOrderWhereInput {
       };
 }
 
-export async function listOrders(actor: Actor, rawFilters: unknown) {
-  const f = orderFiltersSchema.parse(rawFilters ?? {});
+/** Active orders the actor can see that have a delivery without a waybill. */
+async function waybillMissingIds(actor: Actor): Promise<string[]> {
+  const visible = actor.isAdmin
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`EXISTS (SELECT 1 FROM "PurchaseRequest" pr JOIN "ProjectMembership" m
+        ON m."projectId" = pr."projectId" WHERE pr."id" = o."requestId" AND m."userId" = ${actor.userId})`;
+  return missingWaybillOrderIds(
+    db,
+    Prisma.sql`o."organizationId" = ${actor.organizationId} AND ${visible}`,
+  );
+}
+
+/** Prisma filter for the order list and the export (same URL filters). */
+async function orderListWhere(
+  actor: Actor,
+  f: OrderFilters,
+): Promise<Prisma.PurchaseOrderWhereInput> {
   const and: Prisma.PurchaseOrderWhereInput[] = [visibleOrdersWhere(actor)];
   if (f.project) and.push({ request: { projectId: f.project } });
   if (f.status) and.push({ status: f.status });
@@ -653,6 +770,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
       and.push({ id: { in: open }, plannedDeliveryDate: { lt: todayDate() } });
     }
     if (f.delivery === "received") and.push({ status: "ACTIVE", id: { notIn: open } });
+    if (f.delivery === "waybill") and.push({ id: { in: await waybillMissingIds(actor) } });
     if (f.delivery === "cancelled") and.push({ status: "CANCELLED" });
   }
   if (f.q) {
@@ -666,6 +784,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
             some: { requestItem: { name: { contains: f.q, mode: "insensitive" as const } } },
           },
         },
+        { receipts: { some: { waybillNumber: { contains: f.q, mode: "insensitive" as const } } } },
       ],
     });
   }
@@ -673,8 +792,12 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
   const toStart = f.to ? tbilisiDayStart(f.to) : null;
   if (from) and.push({ createdAt: { gte: from } });
   if (toStart) and.push({ createdAt: { lt: new Date(toStart.getTime() + 24 * 3600 * 1000) } });
+  return { AND: and };
+}
 
-  const where = { AND: and };
+export async function listOrders(actor: Actor, rawFilters: unknown) {
+  const f = orderFiltersSchema.parse(rawFilters ?? {});
+  const where = await orderListWhere(actor, f);
   const total = await db.purchaseOrder.count({ where });
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   // An out-of-range page shows the last page, not "no orders yet".
@@ -705,6 +828,14 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
       },
     }),
   ]);
+  const missing = new Set(
+    rows.length
+      ? await missingWaybillOrderIds(
+          db,
+          Prisma.sql`o."id" IN (${Prisma.join(rows.map((r) => r.id))})`,
+        )
+      : [],
+  );
   return {
     rows: rows.map((o) => {
       const items = o.items.map((it) => ({
@@ -722,7 +853,7 @@ export async function listOrders(actor: Actor, rawFilters: unknown) {
         supplier: o.supplier.name,
         request: o.request,
         total: sumDecimals(o.items.map((it) => lineTotal(it.quantity, it.unitPrice))).toString(),
-        delivery: deliveryState(o.status, items),
+        delivery: deliveryState(o.status, items, missing.has(o.id)),
       };
     }),
     total,
@@ -748,4 +879,69 @@ export function totalsByCurrency(orders: { currency: Currency; total: string }[]
     map.set(o.currency, (map.get(o.currency) ?? new Prisma.Decimal(0)).plus(o.total));
   }
   return [...map.entries()].map(([currency, total]) => ({ currency, total: total.toString() }));
+}
+
+// ─── Export for accounting ───────────────────────────────────────────────────
+
+const EXPORT_LIMIT = 20_000;
+
+/**
+ * One row per received order line and delivery, for accounting: waybill, supplier and its code,
+ * project, request/order numbers, material, quantity, price and amount. Uses the order list's
+ * URL filters and the same visibility.
+ */
+export async function exportReceiptLines(actor: Actor, rawFilters: unknown) {
+  const f = orderFiltersSchema.parse(rawFilters ?? {});
+  const where = await orderListWhere(actor, f);
+  const rows = await db.receiptItem.findMany({
+    where: { receipt: { order: where } },
+    orderBy: [{ receipt: { receivedOn: "asc" } }, { receipt: { createdAt: "asc" } }],
+    take: EXPORT_LIMIT,
+    select: {
+      quantity: true,
+      correctsId: true,
+      note: true,
+      receipt: {
+        select: {
+          receivedOn: true,
+          waybillNumber: true,
+          waybillDate: true,
+          receivedBy: { select: { name: true } },
+          order: {
+            select: {
+              number: true,
+              currency: true,
+              supplier: { select: { name: true, taxId: true } },
+              request: { select: { number: true, project: { select: { name: true } } } },
+            },
+          },
+        },
+      },
+      orderItem: {
+        select: {
+          unitPrice: true,
+          requestItem: { select: { name: true, spec: true, unit: true } },
+        },
+      },
+    },
+  });
+  return rows.map((r) => ({
+    receivedOn: r.receipt.receivedOn,
+    waybillNumber: r.receipt.waybillNumber,
+    waybillDate: r.receipt.waybillDate,
+    supplier: r.receipt.order.supplier.name,
+    supplierTaxId: r.receipt.order.supplier.taxId,
+    project: r.receipt.order.request.project.name,
+    requestNumber: r.receipt.order.request.number,
+    orderNumber: r.receipt.order.number,
+    material: r.orderItem.requestItem.name,
+    spec: r.orderItem.requestItem.spec,
+    quantity: r.quantity.toString(),
+    unit: r.orderItem.requestItem.unit,
+    unitPrice: r.orderItem.unitPrice.toString(),
+    amount: lineTotal(r.quantity, r.orderItem.unitPrice).toString(),
+    currency: r.receipt.order.currency as Currency,
+    isCorrection: r.correctsId !== null,
+    receivedBy: r.receipt.receivedBy.name,
+  }));
 }

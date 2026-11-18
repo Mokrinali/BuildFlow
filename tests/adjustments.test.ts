@@ -67,6 +67,7 @@ async function order(
 async function receive(orderId: string, quantity: string) {
   const line = await db.orderItem.findFirstOrThrow({ where: { orderId } });
   return createReceipt(receiver, {
+    waybillNumber: "1000000001",
     orderId,
     receivedOn: todayInTbilisi(),
     items: [{ orderItemId: line.id, quantity }],

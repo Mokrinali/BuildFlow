@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formId, formPayload, runAction, type ActionState } from "@/server/action";
-import { cancelOrder, closeOrder, createOrder } from "@/server/orders/service";
-import { correctReceiptItem, createReceipt } from "@/server/receipts/service";
+import { cancelOrder, closeOrder, createOrder, setSupplierTaxId } from "@/server/orders/service";
+import { correctReceiptItem, createReceipt, setReceiptWaybill } from "@/server/receipts/service";
 import { requireUser } from "@/server/session";
 
 // Ids come from hidden form fields (see formId in server/action.ts for why not .bind()).
@@ -81,4 +81,31 @@ export async function correctReceiptAction(_: ActionState, form: FormData): Prom
       }),
     "მიღება შესწორდა.",
   );
+}
+
+export async function setWaybillAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  return mutate(
+    async () =>
+      setReceiptWaybill(user, formId(form, "receiptId"), {
+        waybillNumber: String(form.get("waybillNumber") ?? ""),
+        waybillDate: String(form.get("waybillDate") ?? ""),
+        reason: String(form.get("reason") ?? ""),
+      }),
+    "ზედნადები შენახულია.",
+  );
+}
+
+export async function setSupplierTaxIdAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  let orderId = "";
+  const state = await runAction(async () => {
+    orderId = formId(form, "orderId");
+    await setSupplierTaxId(user, formId(form, "supplierId"), {
+      taxId: String(form.get("taxId") ?? ""),
+    });
+    return "კოდი შენახულია.";
+  });
+  if (state.ok) revalidatePath(`/orders/${orderId}`);
+  return state;
 }

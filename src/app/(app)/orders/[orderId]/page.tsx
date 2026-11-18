@@ -10,13 +10,21 @@ import {
   formatUnitPrice,
   formatWorkDate,
   todayInTbilisi,
+  workDateToInput,
 } from "@/lib/format";
 import { currencyLabel, eventLabel } from "@/lib/i18n/ka";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import { AppError } from "@/server/errors";
 import { getOrder } from "@/server/orders/service";
 import { requireUser } from "@/server/session";
-import { CancelOrderForm, CloseOrderForm, CorrectReceiptForm, ReceiveForm } from "./order-actions";
+import {
+  CancelOrderForm,
+  CloseOrderForm,
+  CorrectReceiptForm,
+  ReceiveForm,
+  SupplierTaxIdForm,
+  WaybillForm,
+} from "./order-actions";
 
 export const metadata: Metadata = { title: "შეკვეთა" };
 
@@ -86,6 +94,16 @@ export default async function OrderPage({ params, searchParams }: Props) {
                 {order.supplier.phone && (
                   <span className="block text-sm font-normal">{order.supplier.phone}</span>
                 )}
+                <span className="block text-sm font-normal">
+                  ს/კ: {order.supplier.taxId ?? "არ არის მითითებული"}
+                </span>
+                {permissions.canEditSupplier && (
+                  <SupplierTaxIdForm
+                    orderId={order.id}
+                    supplierId={order.supplier.id}
+                    current={order.supplier.taxId}
+                  />
+                )}
               </Row>
               <Row label="დაგეგმილი მიწოდება">
                 {order.plannedDeliveryDate ? formatWorkDate(order.plannedDeliveryDate) : "—"}
@@ -96,6 +114,12 @@ export default async function OrderPage({ params, searchParams }: Props) {
               </Row>
               <Row label="ჯამი">{money(order.total)}</Row>
             </dl>
+            {order.waybillMissing && (
+              <p role="status" className="mt-4 rounded-md bg-orange-50 p-3 text-sm">
+                <strong>ზედნადები აკლია.</strong> შეკვეთა დასრულებულად ჩაითვლება მას შემდეგ, რაც
+                ყველა მიწოდებას ზედნადები ექნება. დაამატეთ ის „მიწოდებების“ სიაში.
+              </p>
+            )}
             {order.status === "CANCELLED" && order.cancelReason && (
               <p className="mt-4 rounded-md bg-gray-100 p-3 text-sm">
                 <strong>გაუქმების მიზეზი:</strong> {order.cancelReason}
@@ -206,6 +230,48 @@ export default async function OrderPage({ params, searchParams }: Props) {
                       <p className="text-xs text-steel-600">
                         {r.receivedBy} · ჩაწერილია {formatDateTime(r.createdAt)}
                       </p>
+                      {!r.isCorrectionOnly && (
+                        <p className="mt-1">
+                          ზედნადები:{" "}
+                          {r.waybillNumber ? (
+                            <strong>
+                              №{r.waybillNumber}
+                              {r.waybillDate && `, ${formatWorkDate(r.waybillDate)}`}
+                            </strong>
+                          ) : (
+                            <strong className="text-red-800">აკლია</strong>
+                          )}
+                        </p>
+                      )}
+                      {r.alsoOn.length > 0 && (
+                        <p className="text-xs text-steel-600">
+                          იგივე ზედნადები მიბმულია:{" "}
+                          {r.alsoOn.map((o, i) => (
+                            <span key={o.id}>
+                              {i > 0 && ", "}
+                              <Link
+                                href={`/orders/${o.id}`}
+                                className="underline underline-offset-4"
+                              >
+                                შეკვეთა {formatOrderNumber(o.number)}
+                              </Link>
+                            </span>
+                          ))}
+                        </p>
+                      )}
+                      {permissions.canEditWaybill && !r.isCorrectionOnly && (
+                        <WaybillForm
+                          orderId={order.id}
+                          receiptId={r.id}
+                          current={r.waybillNumber}
+                          currentDate={
+                            r.waybillDate
+                              ? workDateToInput(r.waybillDate)
+                              : workDateToInput(r.receivedOn)
+                          }
+                          today={todayInTbilisi()}
+                        />
+                      )}
                       {r.note && <p className="mt-1">„{r.note}“</p>}
                       <ul className="mt-2 flex flex-col gap-2">
                         {r.items.map((ri) => (

@@ -399,6 +399,7 @@ describe("receipts", () => {
   it("records several deliveries until fully received", async () => {
     const { r, orderId, cement, rebar } = await orderedRequest();
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       items: [{ orderItemId: cement, quantity: "10" }],
@@ -409,6 +410,7 @@ describe("receipts", () => {
     expect(detail.items.find((i) => i.id === cement)?.remaining).toBe("15");
 
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       note: "მეორე მანქანა",
@@ -435,6 +437,7 @@ describe("receipts", () => {
     const { orderId, cement } = await orderedRequest();
     const err = await expectAppError(
       createReceipt(receiver, {
+        waybillNumber: "1000000001",
         orderId,
         receivedOn: "2020-01-15",
         items: [{ orderItemId: cement, quantity: "1" }],
@@ -447,12 +450,14 @@ describe("receipts", () => {
   it("blocks receiving more than ordered", async () => {
     const { orderId, cement } = await orderedRequest();
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       items: [{ orderItemId: cement, quantity: "20" }],
     });
     const err = await expectAppError(
       createReceipt(receiver, {
+        waybillNumber: "1000000001",
         orderId,
         receivedOn: today(),
         items: [{ orderItemId: cement, quantity: "5.001" }],
@@ -490,6 +495,7 @@ describe("receipts", () => {
   it("does not receive on a cancelled order, and does not cancel a received one", async () => {
     const a = await orderedRequest();
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId: a.orderId,
       receivedOn: today(),
       items: [{ orderItemId: a.cement, quantity: "1" }],
@@ -501,6 +507,7 @@ describe("receipts", () => {
     await cancelOrder(buyer, b.orderId, "გაუქმება");
     await expectAppError(
       createReceipt(receiver, {
+        waybillNumber: "1000000001",
         orderId: b.orderId,
         receivedOn: today(),
         items: [{ orderItemId: b.cement, quantity: "1" }],
@@ -514,6 +521,7 @@ describe("receipts", () => {
     const results = await Promise.allSettled(
       Array.from({ length: 6 }, () =>
         createReceipt(receiver, {
+          waybillNumber: "1000000001",
           orderId,
           receivedOn: today(),
           items: [{ orderItemId: cement, quantity: "10" }],
@@ -532,6 +540,7 @@ describe("receipts", () => {
     const { orderId, cement } = await orderedRequest();
     const results = await Promise.allSettled([
       createReceipt(receiver, {
+        waybillNumber: "1000000001",
         orderId,
         receivedOn: today(),
         items: [{ orderItemId: cement, quantity: "5" }],
@@ -547,6 +556,7 @@ describe("receipts", () => {
   it("corrects a confirmed receipt with a trail and updates the status", async () => {
     const { r, orderId, cement, rebar } = await orderedRequest();
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       items: [
@@ -589,6 +599,7 @@ describe("receipts", () => {
     expect(detail.items.find((i) => i.id === cement)?.received).toBe("22");
     // The missing 3 can be received later.
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       items: [{ orderItemId: cement, quantity: "3" }],
@@ -603,6 +614,7 @@ describe("receipts", () => {
   it("allows cancelling after a receipt was corrected to zero", async () => {
     const { r, orderId, cement } = await orderedRequest();
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId,
       receivedOn: today(),
       items: [{ orderItemId: cement, quantity: "5" }],
@@ -620,6 +632,7 @@ describe("receipts", () => {
     await setProjectArchived(admin, projectId, true);
     await expectAppError(
       createReceipt(receiver, {
+        waybillNumber: "1000000001",
         orderId,
         receivedOn: today(),
         items: [{ orderItemId: cement, quantity: "1" }],
@@ -633,6 +646,8 @@ describe("receipts", () => {
       canCancel: false,
       canCorrect: false,
       canClose: false,
+      canEditWaybill: false,
+      canEditSupplier: false,
     });
   });
 });
@@ -689,6 +704,7 @@ describe("dashboard and delivery filter", () => {
     // Fully receiving the late order removes it from both lists.
     const item = (await orderItemsOf(late.id))[0]!;
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId: late.id,
       receivedOn: todayInTbilisi(),
       items: [{ orderItemId: item.id, quantity: "25" }],
@@ -743,6 +759,7 @@ describe("access and races (code review findings)", () => {
     );
     const item = (await orderItemsOf(o.id))[0]!;
     await createReceipt(receiver, {
+      waybillNumber: "1000000001",
       orderId: o.id,
       receivedOn: todayInTbilisi(),
       items: [{ orderItemId: item.id, quantity: "20" }],

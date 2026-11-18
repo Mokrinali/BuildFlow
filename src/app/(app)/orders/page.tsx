@@ -47,6 +47,18 @@ export default async function OrdersPage({ searchParams }: Props) {
     listProjects(user, { includeArchived: true }),
     listSuppliers(user),
   ]);
+  // The export uses the same filters as the list (without paging).
+  const exportQuery = new URLSearchParams(
+    Object.entries({
+      project: filters.project,
+      status: filters.status,
+      supplier: filters.supplier,
+      delivery: filters.delivery,
+      q: filters.q,
+      from: filters.from,
+      to: filters.to,
+    }).filter((e): e is [string, string] => typeof e[1] === "string" && e[1] !== ""),
+  ).toString();
   const filtered = Boolean(
     filters.project ||
     filters.status ||
@@ -130,6 +142,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             <option value="open">მისაღები</option>
             <option value="overdue">ვადაგადაცილებული</option>
             <option value="received">{deliveryStateLabel.RECEIVED}</option>
+            <option value="waybill">ზედნადები აკლია</option>
             <option value="cancelled">{orderStatusLabel.CANCELLED}</option>
           </select>
         </div>
@@ -163,9 +176,18 @@ export default async function OrdersPage({ searchParams }: Props) {
         </div>
       </form>
 
-      <p className="mb-3 text-sm text-steel-600" aria-live="polite">
-        ნაპოვნია: {total}
-      </p>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-steel-600" aria-live="polite">
+          ნაპოვნია: {total}
+        </p>
+        <a
+          href={`/orders/export${exportQuery ? `?${exportQuery}` : ""}`}
+          className="text-sm font-medium underline underline-offset-4"
+          download
+        >
+          მიღებების ექსპორტი (CSV, ბუღალტრიისთვის)
+        </a>
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState

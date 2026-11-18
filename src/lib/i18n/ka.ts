@@ -33,6 +33,7 @@ export const requestStatusLabel: Record<RequestStatus, string> = {
   PARTIALLY_ORDERED: "ნაწილობრივ შეკვეთილი",
   ORDERED: "შეკვეთილი",
   PARTIALLY_RECEIVED: "ნაწილობრივ მიღებული",
+  AWAITING_WAYBILL: "მიღებული, ზედნადები აკლია",
   RECEIVED: "მიღებული",
   CANCELLED: "გაუქმებული",
 };
@@ -89,6 +90,10 @@ export const errors = {
   importRepeat:
     "ეს ტექსტი ამ პროექტში უკვე შემოტანილია. თუ ხელახლა შემოტანა განზრახ გსურთ, მონიშნეთ შესაბამისი ველი.",
   correctionOfCorrection: "შესწორდება მხოლოდ თავდაპირველი მიღების ჩანაწერი.",
+  waybillOnCorrection: "ზედნადები ეთითება თავდაპირველ მიღებაზე, არა შესწორებაზე.",
+  waybillSame: "ზედნადების მონაცემები არ შეცვლილა.",
+  waybillChangeReason: "არსებული ზედნადების შეცვლისთვის მიუთითეთ მიზეზი.",
+  taxIdFormat: "საიდენტიფიკაციო კოდი უნდა იყოს 9 ან 11 ციფრი.",
   adjustNotAllowed: "დამტკიცებული რაოდენობის შეცვლა ამ სტატუსში შეუძლებელია.",
   adjustBelowOrdered: "დამტკიცებული რაოდენობა ვერ იქნება შეკვეთილზე ან მიღებულზე ნაკლები.",
   adjustSame: "ახალი რაოდენობა ემთხვევა მიმდინარე დამტკიცებულს.",
@@ -118,6 +123,7 @@ export const requestStatusTone: Record<
   PARTIALLY_ORDERED: "orange",
   ORDERED: "navy",
   PARTIALLY_RECEIVED: "orange",
+  AWAITING_WAYBILL: "orange",
   RECEIVED: "green",
   CANCELLED: "gray",
 };
@@ -153,7 +159,8 @@ export const currencyLabel: Record<Currency, string> = {
 };
 
 /** Delivery progress of an order (derived from received vs ordered quantities). */
-export type DeliveryState = "CANCELLED" | "AWAITING" | "PARTIAL" | "RECEIVED" | "CLOSED";
+export type DeliveryState =
+  "CANCELLED" | "AWAITING" | "PARTIAL" | "WAYBILL_MISSING" | "RECEIVED" | "CLOSED";
 
 export const deliveryStateLabel: Record<DeliveryState, string> = {
   CANCELLED: "გაუქმებული",
@@ -161,6 +168,7 @@ export const deliveryStateLabel: Record<DeliveryState, string> = {
   PARTIAL: "ნაწილობრივ მიღებული",
   RECEIVED: "მიღებული",
   CLOSED: "დახურული (ნაწილობრივ)",
+  WAYBILL_MISSING: "მიღებული, ზედნადები აკლია",
 };
 
 export const deliveryStateTone: Record<DeliveryState, "gray" | "navy" | "green" | "orange"> = {
@@ -169,6 +177,7 @@ export const deliveryStateTone: Record<DeliveryState, "gray" | "navy" | "green" 
   PARTIAL: "orange",
   RECEIVED: "green",
   CLOSED: "gray",
+  WAYBILL_MISSING: "orange",
 };
 
 export const orderEventLabel: Record<string, string> = {
@@ -177,6 +186,9 @@ export const orderEventLabel: Record<string, string> = {
   "order.closed": "შეკვეთა დაიხურა ნაკლები რაოდენობით",
   "receipt.created": "მიწოდება დაფიქსირდა",
   "receipt.corrected": "მიღება შესწორდა",
+  "receipt.waybill_set": "ზედნადები მიეთითა",
+  "receipt.waybill_changed": "ზედნადები შეიცვალა",
+  "supplier.tax_id_set": "მომწოდებლის საიდენტიფიკაციო კოდი მიეთითა",
   "supplier.created": "მომწოდებელი დაემატა",
 };
 

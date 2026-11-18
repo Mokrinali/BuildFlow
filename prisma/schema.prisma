@@ -37,6 +37,8 @@ enum RequestStatus {
   PARTIALLY_ORDERED
   ORDERED
   PARTIALLY_RECEIVED
+  // Everything received, but some delivery still has no waybill (ზედნადები): not finished yet.
+  AWAITING_WAYBILL
   RECEIVED
   CANCELLED
 }
@@ -342,18 +344,23 @@ model OrderItem {
 // ─── Receipts ────────────────────────────────────────────────────────────────
 
 model Receipt {
-  id           String   @id @default(cuid())
-  orderId      String
-  receivedOn   DateTime @db.Date
-  receivedById String
-  note         String?
-  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  id            String    @id @default(cuid())
+  orderId       String
+  receivedOn    DateTime  @db.Date
+  receivedById  String
+  note          String?
+  // Waybill (ზედნადები) of this delivery. Optional when recording, but an order or request is
+  // finished only when every delivery has one. Kept as plain fields for a later RS.ge link.
+  waybillNumber String?
+  waybillDate   DateTime? @db.Date
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
 
   order      PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
   receivedBy User          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
   items      ReceiptItem[]
 
   @@index([orderId])
+  @@index([waybillNumber])
 }
 
 model ReceiptItem {

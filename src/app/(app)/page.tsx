@@ -70,6 +70,45 @@ export default async function DashboardPage({ searchParams }: Props) {
         </p>
       )}
       <p className="mb-6 text-steel-600">გამარჯობა, {user.name}!</p>
+      {orders.waybillCount > 0 && (
+        <section
+          aria-labelledby="no-waybill"
+          className="mb-6 rounded-lg border border-orange bg-white p-4 sm:p-6"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="no-waybill" className="font-semibold">
+              ზედნადები აკლია ({orders.waybillCount})
+            </h2>
+            <Link
+              href="/orders?delivery=waybill"
+              className="text-sm font-medium underline underline-offset-4"
+            >
+              ყველა →
+            </Link>
+          </div>
+          <p className="text-sm text-steel-600">
+            მასალა მიღებულია, მაგრამ მიწოდებას ზედნადები არ აქვს. შეკვეთა დასრულებულად ჩაითვლება
+            ზედნადების დამატების შემდეგ.
+          </p>
+          <ul className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm">
+            {orders.waybill.map((o) => (
+              <li key={o.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  <span className="font-semibold">შეკვეთა {formatOrderNumber(o.number)}</span> ·{" "}
+                  {o.supplier.name} · {o.request.project.name}
+                </span>
+                <Link
+                  href={`/orders/${o.id}`}
+                  className="font-medium underline underline-offset-4"
+                  aria-label={`შეკვეთა ${formatOrderNumber(o.number)}: ზედნადების დამატება`}
+                >
+                  დამატება →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {toDecide.length > 0 && (
         <section
           aria-labelledby="to-decide"

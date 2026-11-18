@@ -42,6 +42,7 @@ export function OrderForm({
   const uid = useId();
   const [supplier, setSupplier] = useState(suppliers[0]?.id ?? NEW_SUPPLIER);
   const [supplierName, setSupplierName] = useState("");
+  const [supplierTaxId, setSupplierTaxId] = useState("");
   const [currency, setCurrency] = useState<Currency>("GEL");
   const [plannedDeliveryDate, setPlannedDeliveryDate] = useState("");
   // Prefill each line with what is still available to order.
@@ -74,13 +75,23 @@ export function OrderForm({
         requestId,
         supplierId: supplier === NEW_SUPPLIER ? "" : supplier,
         supplierName: supplier === NEW_SUPPLIER ? supplierName : "",
+        supplierTaxId: supplier === NEW_SUPPLIER ? supplierTaxId : "",
         currency,
         plannedDeliveryDate,
         items: sent,
       }),
       sentToItem: map,
     };
-  }, [lines, items, requestId, supplier, supplierName, currency, plannedDeliveryDate]);
+  }, [
+    lines,
+    items,
+    requestId,
+    supplier,
+    supplierName,
+    supplierTaxId,
+    currency,
+    plannedDeliveryDate,
+  ]);
 
   const lineErrors = useMemo(() => {
     const out: Record<number, Partial<Record<keyof Line, string>>> = {};
@@ -164,6 +175,28 @@ export function OrderForm({
             {(fe.supplier || fe.supplierName) && (
               <p id={`${uid}-supplier-name-err`} className="text-sm text-red-800">
                 {fe.supplier ?? fe.supplierName}
+              </p>
+            )}
+          </div>
+        )}
+        {supplier === NEW_SUPPLIER && (
+          <div className="flex flex-col gap-1">
+            <label htmlFor={`${uid}-supplier-tax`} className="text-sm font-medium">
+              საიდენტიფიკაციო კოდი (არასავალდებულო)
+            </label>
+            <input
+              id={`${uid}-supplier-tax`}
+              inputMode="numeric"
+              maxLength={11}
+              value={supplierTaxId}
+              onChange={(e) => setSupplierTaxId(e.target.value)}
+              aria-invalid={fe.supplierTaxId ? true : undefined}
+              aria-describedby={fe.supplierTaxId ? `${uid}-supplier-tax-err` : undefined}
+              className={inputClass}
+            />
+            {fe.supplierTaxId && (
+              <p id={`${uid}-supplier-tax-err`} className="text-sm text-red-800">
+                {fe.supplierTaxId}
               </p>
             )}
           </div>

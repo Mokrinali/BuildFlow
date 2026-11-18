@@ -22,6 +22,7 @@ export const ORDER_DRIVEN: RequestStatus[] = [
   "PARTIALLY_ORDERED",
   "ORDERED",
   "PARTIALLY_RECEIVED",
+  "AWAITING_WAYBILL",
   "RECEIVED",
 ];
 
@@ -38,15 +39,21 @@ export type ItemProgress = {
 
 /**
  * Request status from actual quantities. Receiving takes precedence over ordering:
- * all received → RECEIVED; any received → PARTIALLY_RECEIVED; all ordered → ORDERED;
- * any ordered → PARTIALLY_ORDERED; otherwise APPROVED.
+ * all received → RECEIVED (or AWAITING_WAYBILL while a delivery has no waybill);
+ * any received → PARTIALLY_RECEIVED; all ordered → ORDERED; any ordered → PARTIALLY_ORDERED;
+ * otherwise APPROVED.
  */
-export function deriveRequestStatus(all: ItemProgress[]): RequestStatus {
+export function deriveRequestStatus(
+  all: ItemProgress[],
+  opts: { waybillMissing?: boolean } = {},
+): RequestStatus {
   if (all.length === 0) return "APPROVED";
   // Items whose whole quantity was cancelled (approved 0, nothing received) no longer count.
   const items = all.filter((i) => i.approved.gt(0) || i.received.gt(0));
   if (items.length === 0) return "CANCELLED";
-  if (items.every((i) => i.received.gte(i.approved))) return "RECEIVED";
+  if (items.every((i) => i.received.gte(i.approved))) {
+    return opts.waybillMissing ? "AWAITING_WAYBILL" : "RECEIVED";
+  }
   if (items.some((i) => i.received.gt(0))) return "PARTIALLY_RECEIVED";
   if (items.every((i) => i.ordered.gte(i.approved))) return "ORDERED";
   if (items.some((i) => i.ordered.gt(0))) return "PARTIALLY_ORDERED";
@@ -122,7 +129,9 @@ export async function loadItemProgress(tx: Db | Tx, requestId: string) {
 /** Recompute and store the request status after an order or receipt change (request locked). */
 export async function recomputeRequestStatus(tx: Tx, actor: Actor, req: LockedRequest) {
   if (!ORDER_DRIVEN.includes(req.status)) return req.status;
-  const next = deriveRequestStatus(await loadItemProgress(tx, req.id));
+  const waybillMissing =
+    (await missingWaybillOrderIds(tx, Prisma.sql`o."requestId" = ${req.id}`)).length > 0;
+  const next = deriveRequestStatus(await loadItemProgress(tx, req.id), { waybillMissing });
   if (next === req.status) return next;
   await tx.purchaseRequest.update({ where: { id: req.id }, data: { status: next } });
   await recordEvent(tx, actor, {
@@ -136,17 +145,41 @@ export async function recomputeRequestStatus(tx: Tx, actor: Actor, req: LockedRe
 }
 
 /**
+ * Active orders (matching `where`, SQL over "PurchaseOrder" o) with a delivery that has no
+ * waybill yet. Only deliveries that still count are considered: correction-only receipts and
+ * entries corrected down to zero need no waybill.
+ */
+export async function missingWaybillOrderIds(tx: Db | Tx, where: Prisma.Sql): Promise<string[]> {
+  const rows = await tx.$queryRaw<{ orderId: string }[]>`
+    SELECT DISTINCT r."orderId"
+    FROM "Receipt" r
+    JOIN "PurchaseOrder" o ON o."id" = r."orderId"
+    JOIN "ReceiptItem" ri ON ri."receiptId" = r."id" AND ri."correctsId" IS NULL
+    LEFT JOIN (
+      SELECT "correctsId", SUM("quantity") AS "delta" FROM "ReceiptItem"
+      WHERE "correctsId" IS NOT NULL GROUP BY "correctsId"
+    ) c ON c."correctsId" = ri."id"
+    WHERE (r."waybillNumber" IS NULL OR r."waybillNumber" = '') AND o."status" = 'ACTIVE' AND ${where}
+    GROUP BY r."id", r."orderId"
+    HAVING SUM(ri."quantity" + COALESCE(c."delta", 0)) > 0`;
+  return rows.map((r) => r.orderId);
+}
+
+/**
  * Delivery progress of one order. A line closed short is finished at what was received; an
  * order whose lines are all finished, at least one of them short, is CLOSED.
  */
 export function deliveryState(
   status: OrderStatus,
   items: { quantity: string; received: string; closed?: boolean }[],
+  waybillMissing = false,
 ): DeliveryState {
   if (status === "CANCELLED") return "CANCELLED";
   const rec = items.map((i) => new Prisma.Decimal(i.received));
   const full = items.map((i, k) => rec[k]!.gte(i.quantity));
   if (items.every((i, k) => full[k] || i.closed)) {
+    // Physically done, but not finished until every delivery has its waybill.
+    if (waybillMissing) return "WAYBILL_MISSING";
     return items.some((i, k) => i.closed && !full[k]) ? "CLOSED" : "RECEIVED";
   }
   if (rec.some((r) => r.gt(0))) return "PARTIAL";
