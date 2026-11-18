@@ -448,7 +448,7 @@ function parseSegment(segment: string): ParsedItem | null {
   const specText = specs.map((s) => segment.slice(s.start, s.end).trim());
   const rest = blank(segment, specs);
   const candidates = findCandidates(rest);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) return specs.length > 0 ? specOnlyItem(rest, specText) : null;
 
   const atStart = (c: Candidate) => !hasLetters(rest.slice(0, c.start));
   const atEnd = (c: Candidate) => !hasLetters(rest.slice(c.end));
@@ -530,6 +530,33 @@ function parseSegment(segment: string): ParsedItem | null {
     flags: [...flags],
     issues,
   };
+}
+
+/**
+ * "ფიცარი 50x150": a name with a size but no quantity. The size shows it is a material, so it
+ * becomes an item with the quantity (and unit, unless a unit word is present) to clarify, instead
+ * of a skipped line. Lines without a size ("რამე სხვა, მერე გეტყვი") stay skipped.
+ */
+function specOnlyItem(rest: string, specText: string[]): ParsedItem | null {
+  let nameText = rest;
+  let unit: string | null = null;
+  for (const [u, re] of UNIT_WORD) {
+    const m = re.exec(nameText);
+    if (m) {
+      unit = u;
+      nameText = nameText.slice(0, m.index) + " " + nameText.slice(m.index + m[0].length);
+      break;
+    }
+  }
+  const name = cleanName(nameText);
+  if (!name) return null;
+  const flags: ItemFlag[] = ["quantity"];
+  const issues = ["რაოდენობა მითითებული არ არის. მიუთითეთ."];
+  if (!unit) {
+    flags.push("unit");
+    issues.push("ერთეული ვერ ამოიცნო.");
+  }
+  return { name, spec: cleanName(specText.join(" ")), quantity: null, unit, flags, issues };
 }
 
 /**

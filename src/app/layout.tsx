@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_Georgian } from "next/font/google";
+import { GeorgianValidation } from "@/components/georgian-validation";
 import "./globals.css";
 
 const georgian = Noto_Sans_Georgian({
@@ -28,7 +29,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ka" className={georgian.variable}>
-      <body className="min-h-dvh font-sans antialiased">{children}</body>
+      <body className="min-h-dvh font-sans antialiased">
+        <GeorgianValidation />
+        {children}
+      </body>
     </html>
   );
 }

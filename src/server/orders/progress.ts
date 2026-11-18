@@ -6,9 +6,10 @@
 // request, so two parallel orders or receipts cannot both pass the limit check.
 // Lock order is always request → organization (order numbering), which avoids deadlocks.
 import { Prisma } from "@/generated/prisma/client";
-import type { RequestStatus } from "@/generated/prisma/enums";
+import type { OrderStatus, RequestStatus } from "@/generated/prisma/enums";
 import type { Db, Tx } from "@/lib/db";
 import type { Actor } from "@/server/access";
+import type { DeliveryState } from "@/lib/i18n/ka";
 import { recordEvent } from "@/server/audit";
 import { notFound } from "@/server/errors";
 
@@ -107,4 +108,16 @@ export async function recomputeRequestStatus(tx: Tx, actor: Actor, req: LockedRe
     changes: { from: req.status, to: next },
   });
   return next;
+}
+
+/** Delivery progress of one order from its ordered and received quantities. */
+export function deliveryState(
+  status: OrderStatus,
+  items: { quantity: string; received: string }[],
+): DeliveryState {
+  if (status === "CANCELLED") return "CANCELLED";
+  const rec = items.map((i) => new Prisma.Decimal(i.received));
+  if (items.every((i, k) => rec[k]!.gte(i.quantity))) return "RECEIVED";
+  if (rec.some((r) => r.gt(0))) return "PARTIAL";
+  return "AWAITING";
 }

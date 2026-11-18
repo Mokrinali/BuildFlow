@@ -27,7 +27,7 @@ function queryString(f: OrderFilters, page?: number) {
   return s ? `?${s}` : "";
 }
 
-const fieldClass = "min-h-10 rounded-md border border-steel bg-white px-2 text-sm";
+const fieldClass = "min-h-10 w-full min-w-0 rounded-md border border-steel bg-white px-2 text-sm";
 
 export default async function OrdersPage({ searchParams }: Props) {
   const user = await requireUser();
@@ -64,10 +64,10 @@ export default async function OrdersPage({ searchParams }: Props) {
       {/* GET form: filters live in the URL, so they survive reloads and can be shared. */}
       <form
         method="get"
-        className="mb-6 grid grid-cols-1 gap-3 rounded-lg border border-line bg-white p-4 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_0.8fr_0.9fr_0.9fr_auto]"
+        className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,11rem),1fr))] gap-3 rounded-lg border border-line bg-white p-4"
         aria-label="შეკვეთების ფილტრი"
       >
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-q" className="text-xs font-medium">
             ძიება (ნომერი ან მასალა)
           </label>
@@ -79,7 +79,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             className={fieldClass}
           />
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-project" className="text-xs font-medium">
             პროექტი
           </label>
@@ -98,7 +98,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             ))}
           </select>
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-supplier" className="text-xs font-medium">
             მომწოდებელი
           </label>
@@ -116,7 +116,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             ))}
           </select>
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-delivery" className="text-xs font-medium">
             მიწოდება
           </label>
@@ -133,7 +133,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             <option value="cancelled">{orderStatusLabel.CANCELLED}</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-from" className="text-xs font-medium">
             გაფორმდა (დან)
           </label>
@@ -145,7 +145,7 @@ export default async function OrdersPage({ searchParams }: Props) {
             className={fieldClass}
           />
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-to" className="text-xs font-medium">
             გაფორმდა (მდე)
           </label>

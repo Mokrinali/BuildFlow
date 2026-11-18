@@ -33,7 +33,12 @@ export async function createOrderAction(_: ActionState, form: FormData): Promise
   const state = await runAction(async () => {
     orderId = (await createOrder(user, formPayload(form))).id;
   });
-  if (!state.ok) return state;
+  if (!state.ok) {
+    // Another order may have been placed meanwhile (that is a typical reason for the error):
+    // refresh the form's approved/ordered/remaining figures. Typed values stay in client state.
+    revalidatePath("/orders/new");
+    return state;
+  }
   revalidatePath("/orders");
   revalidatePath("/requests");
   redirect(`/orders/${orderId}?notice=created`);

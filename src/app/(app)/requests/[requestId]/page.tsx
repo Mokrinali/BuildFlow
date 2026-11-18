@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { RequestStatusBadge } from "@/components/request-status";
+import { DeliveryBadge, RequestStatusBadge } from "@/components/request-status";
 import { ButtonLink, Card, EmptyState, PageHeader } from "@/components/ui";
 import { formatDateTime, formatMoney, formatQuantity, formatWorkDate } from "@/lib/format";
-import { eventLabel, orderStatusLabel, priorityLabel, requestStatusLabel } from "@/lib/i18n/ka";
+import { eventLabel, priorityLabel, requestStatusLabel } from "@/lib/i18n/ka";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import type { RequestStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/server/errors";
@@ -247,9 +247,7 @@ export default async function RequestPage({ params, searchParams }: Props) {
                           მიწოდება: {formatWorkDate(o.plannedDeliveryDate)}
                         </span>
                       )}
-                      {o.status === "CANCELLED" && (
-                        <span className="text-steel-600">({orderStatusLabel.CANCELLED})</span>
-                      )}
+                      <DeliveryBadge state={o.delivery} />
                     </li>
                   ))}
                 </ul>

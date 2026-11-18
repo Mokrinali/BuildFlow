@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const projects = await listProjects(user);
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
+    <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2"

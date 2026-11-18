@@ -58,3 +58,62 @@ describe("logging without user data", () => {
     expect(frames).not.toContain("first line");
   });
 });
+
+describe("browser test findings: formatting without Intl locale data", () => {
+  // The formatter must match Node's ka-GE Intl output exactly, so server and client agree even
+  // in a browser that has no ka-GE data.
+  const intl = (o: Intl.NumberFormatOptions) => new Intl.NumberFormat("ka-GE", o);
+  const values = [
+    0,
+    1.5,
+    "1.5",
+    "0.001",
+    "0.0005",
+    1234.5,
+    "4415",
+    "12345.678",
+    1234567,
+    "9999.9995",
+    -5,
+
+    "18.5",
+    "0.0375",
+    "100000",
+    2.675,
+    "1.005",
+    1e21,
+    1e-7,
+    "999.999",
+  ];
+
+  it.each(values)("quantity %s", async (v) => {
+    const { formatQuantity } = await import("./format");
+    expect(formatQuantity(v)).toBe(intl({ maximumFractionDigits: 3 }).format(Number(v)));
+  });
+
+  it.each(["GEL", "USD", "EUR"])("money and unit prices in %s", async (currency) => {
+    const { formatMoney, formatUnitPrice } = await import("./format");
+    for (const v of values.filter((x) => Math.abs(Number(x)) < 1e15)) {
+      expect(formatMoney(v, currency)).toBe(
+        intl({ style: "currency", currency }).format(Number(v)),
+      );
+      expect(formatUnitPrice(v, currency)).toBe(
+        intl({
+          style: "currency",
+          currency,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 4,
+        }).format(Number(v)),
+      );
+    }
+  });
+
+  it("formats dates as dd.mm.yyyy in Tbilisi time", async () => {
+    const { formatIsoDate } = await import("./format");
+    const d = new Date("2026-11-18T10:02:00Z");
+    expect(formatDateTime(d)).toBe("18.11.2026, 14:02");
+    expect(formatDate(d)).toBe("18.11.2026");
+    expect(formatIsoDate("2026-01-05")).toBe("05.01.2026");
+    expect(formatIsoDate("bad")).toBe("bad");
+  });
+});

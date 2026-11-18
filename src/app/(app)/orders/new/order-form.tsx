@@ -3,7 +3,8 @@
 import { useActionState, useId, useMemo, useState } from "react";
 import { Button, FormMessage } from "@/components/ui";
 import type { Currency } from "@/generated/prisma/enums";
-import { formatQuantity } from "@/lib/format";
+import { formatMoney, formatQuantity } from "@/lib/format";
+import { normalizePrice, normalizeQuantity } from "@/lib/quantity";
 import { currencyLabel } from "@/lib/i18n/ka";
 import { initialActionState } from "@/server/action-state";
 import { createOrderAction } from "../actions";
@@ -47,7 +48,8 @@ export function OrderForm({
   const [lines, setLines] = useState<Line[]>(() =>
     items.map((it) => ({
       include: it.available !== "0",
-      quantity: it.available !== "0" ? it.available : "",
+      // Decimal comma, as users type it; the server accepts both.
+      quantity: it.available !== "0" ? it.available.replace(".", ",") : "",
       unitPrice: "",
       note: "",
     })),
@@ -98,6 +100,19 @@ export function OrderForm({
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   const fe = state.fieldErrors ?? {};
+
+  // Preview of the order total; the server computes the stored amounts exactly.
+  const total = useMemo(() => {
+    let sum = 0;
+    for (const l of lines) {
+      if (!l.include) continue;
+      const q = normalizeQuantity(l.quantity);
+      const p = normalizePrice(l.unitPrice);
+      if (q === null || p === null) return null;
+      sum += Number(q) * Number(p);
+    }
+    return sum;
+  }, [lines]);
 
   return (
     <form action={action} className="flex flex-col gap-6">
@@ -288,6 +303,12 @@ export function OrderForm({
         </ol>
       </section>
 
+      <p className="text-base" aria-live="polite">
+        ჯამი:{" "}
+        <span className="font-semibold">
+          {total === null ? "შეავსეთ რაოდენობა და ფასი" : formatMoney(total.toFixed(2), currency)}
+        </span>
+      </p>
       <FormMessage ok={state.ok} message={state.message} />
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending}>

@@ -207,7 +207,8 @@ function rowsFrom(preview: ImportPreview): Row[] {
           lineNo: l.lineNo,
           name: it.name,
           spec: it.spec,
-          quantity: it.quantity ?? "",
+          // Shown with a decimal comma, as users type it; the server accepts both.
+          quantity: (it.quantity ?? "").replace(".", ","),
           unit: it.unit ?? "",
           note: "",
           skip: false,

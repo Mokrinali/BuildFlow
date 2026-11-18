@@ -355,7 +355,11 @@ describe("delivery date", () => {
     expect(one("გამანაწილებელი ყუთი 10")).toMatchObject({ unit: "ყუთი", flags: ["unit"] });
     const sizes = parse("არმატურა 10/12/14");
     expect(sizes.desiredDate).toBeNull();
-    expect(sizes.lines[0]?.kind).toBe("skipped");
+    // Sizes, not a date and not a quantity: an item whose quantity must be clarified.
+    expect(sizes.lines[0]).toMatchObject({
+      kind: "items",
+      items: [{ name: "არმატურა", spec: "10/12/14", quantity: null }],
+    });
     expect(parse("მიწოდება 20.11.26").desiredDate?.value).toBe("2026-11-20");
   });
 
@@ -397,5 +401,54 @@ describe("limits and hashing", () => {
     expect(canonicalForHash("Ცემენტი  25\r\n\r\n ქვიშა 3 ")).toBe(
       canonicalForHash("ცემენტი 25\nქვიშა 3"),
     );
+  });
+});
+
+describe("browser test findings: material with a size but no quantity", () => {
+  const text = [
+    "გამარჯობა, ხვალისთვის გვჭირდება:",
+    "- ცემენტი 25 ტომარა",
+    "- 12 ც. არმატურა Ø12",
+    "- ქვიშა 3,5 მ³",
+    "- რამე სხვა, მერე გეტყვი",
+    "- ფიცარი 50x150",
+    "მადლობა",
+  ].join("\n");
+
+  it("turns 'ფიცარი 50x150' into an item to clarify, with the size as its spec", () => {
+    const lines = parse(text).lines;
+    const board = lines[5]!;
+    expect(board.kind).toBe("items");
+    const item = (board as Extract<ParsedLine, { kind: "items" }>).items[0]!;
+    expect(item).toMatchObject({ name: "ფიცარი", spec: "50x150", quantity: null, unit: null });
+    expect(item.flags).toEqual(expect.arrayContaining(["quantity", "unit"]));
+  });
+
+  it("keeps the other lines as before", () => {
+    const lines = parse(text).lines;
+    expect(lines.map((l) => l.kind)).toEqual([
+      "skipped",
+      "items",
+      "items",
+      "items",
+      "skipped",
+      "items",
+      "skipped",
+    ]);
+    const items = lines.flatMap((l) => (l.kind === "items" ? l.items : []));
+    expect(items.map((i) => [i.name, i.spec, i.quantity, i.unit])).toEqual([
+      ["ცემენტი", "", "25", "ტომარა"],
+      ["არმატურა", "Ø12", "12", "ცალი"],
+      ["ქვიშა", "", "3.5", "მ³"],
+      ["ფიცარი", "50x150", null, null],
+    ]);
+  });
+
+  it("uses a unit word when the line has one", () => {
+    expect(one("ფიცარი 50x150 ცალი")).toMatchObject({
+      name: "ფიცარი",
+      quantity: null,
+      unit: "ცალი",
+    });
   });
 });

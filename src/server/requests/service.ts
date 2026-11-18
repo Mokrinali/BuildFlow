@@ -11,7 +11,7 @@ import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
-import { ORDERABLE, lockRequest } from "@/server/orders/progress";
+import { ORDERABLE, deliveryState, lockRequest } from "@/server/orders/progress";
 import { AppError, notFound } from "@/server/errors";
 import { parseInput } from "@/server/validation";
 
@@ -520,7 +520,13 @@ export async function getRequest(actor: Actor, requestId: string) {
           currency: true,
           plannedDeliveryDate: true,
           supplier: { select: { name: true } },
-          items: { select: { quantity: true, unitPrice: true } },
+          items: {
+            select: {
+              quantity: true,
+              unitPrice: true,
+              receiptItems: { select: { quantity: true } },
+            },
+          },
         },
       },
     },
@@ -549,6 +555,13 @@ export async function getRequest(actor: Actor, requestId: string) {
 
   const orders = req.orders.map(({ items: lines, ...o }) => ({
     ...o,
+    delivery: deliveryState(
+      o.status,
+      lines.map((l) => ({
+        quantity: l.quantity.toString(),
+        received: sum(l.receiptItems.map((r) => r.quantity)).toString(),
+      })),
+    ),
     total: sum(
       lines.map((l) =>
         l.quantity.times(l.unitPrice).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),

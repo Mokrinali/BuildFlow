@@ -3,16 +3,17 @@
 // the sum ordered over ACTIVE orders may not exceed the approved quantity; one currency per order.
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import type { Currency, OrderStatus, ProjectRole } from "@/generated/prisma/enums";
+import type { Currency, ProjectRole } from "@/generated/prisma/enums";
 import { db, type Tx } from "@/lib/db";
 import { parseWorkDate, tbilisiDayStart, todayInTbilisi } from "@/lib/format";
-import { errors, type DeliveryState } from "@/lib/i18n/ka";
+import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizePrice, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
 import { AppError, notFound } from "@/server/errors";
 import {
   ORDERABLE,
+  deliveryState,
   loadItemProgress,
   lockRequest,
   recomputeRequestStatus,
@@ -435,17 +436,6 @@ export async function getOrder(actor: Actor, orderId: string) {
     access,
     permissions,
   };
-}
-
-function deliveryState(
-  status: OrderStatus,
-  items: { quantity: string; received: string }[],
-): DeliveryState {
-  if (status === "CANCELLED") return "CANCELLED";
-  const rec = items.map((i) => new Prisma.Decimal(i.received));
-  if (items.every((i, k) => rec[k]!.gte(i.quantity))) return "RECEIVED";
-  if (rec.some((r) => r.gt(0))) return "PARTIAL";
-  return "AWAITING";
 }
 
 /** URL filters for the order list (unknown or invalid values are ignored). */

@@ -21,8 +21,11 @@ let otherOrgAdmin: Actor;
 let projectId: string;
 let otherProjectId: string;
 
+// The header carries the day the message was written; relative dates ("ხვალ") count from it,
+// so it must be today or the desired date can end up in the past.
+const [yyyy, mm, dd] = todayInTbilisi().split("-");
 const TEXT = [
-  "[16.11.26, 09:15] ნიკა: გამარჯობა, დამირეკეთ 599 12 34 56",
+  `[${dd}.${mm}.${yyyy!.slice(2)}, 09:15] ნიკა: გამარჯობა, დამირეკეთ 599 12 34 56`,
   "საჭიროა:",
   "- ცემენტი M400 25 ტომარა",
   "- 12 ც. არმატურა Ø12",
