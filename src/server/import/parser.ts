@@ -290,12 +290,14 @@ const SPEC_PATTERNS: RegExp[] = [
   new RegExp(String.raw`(?<![\p{L}\d])${NUM}\s*\p{L}{0,6}-?იან\p{L}*`, "gu"),
 ];
 // Phone numbers only in an unmistakable shape, so "არმატურა 500 12 50 ღერი" stays an item:
-// a +995 prefix, a mobile number grouped 5XX XX XX XX, or 7+ digits in a row. Looser shapes
-// (5XX XXX XXX, landlines) count only when the line talks about calling.
+// a 995 prefix with the full 9-digit number, a mobile number grouped 5XX XX XX XX (5 then a
+// non-zero digit), or 7+ digits in a row. Looser shapes (5XX XXX XXX, landlines) count only when
+// the line talks about calling or has no words at all. A number followed by a unit is never a
+// phone ("ბლოკი 520 20 20 40 ცალი").
 const NOISE_PATTERNS: RegExp[] = [
   // +995 599 12 34 56, +995 32 2 12 34 56 (landline)
-  /\+?995[\s-]?\d{2,3}(?:[\s-]?\d{1,3}){2,4}(?!\d)/gu,
-  /(?<![\d.,-])5\d{2}(?:[\s-]?\d{2}){3}(?![\d-])/gu,
+  /(?:\+995|(?<![\d.,-])995)[\s-]?(?:\d[\s-]?){8}\d(?!\d)/gu,
+  /(?<![\d.,-])5[1-9]\d(?:[\s-]?\d{2}){3}(?![\d-])/gu,
   /(?<!\d)\d{7,}(?!\d)/gu,
   // Times: 09:30, 10 საათზე
   /(?<!\d)\d{1,2}:\d{2}(?!\d)/gu,
@@ -305,7 +307,14 @@ const NOISE_PATTERNS: RegExp[] = [
 const PHONE_CONTEXT = /(?:რეკ|ტელ|ნომერ|მობ|კონტაქტ)/u;
 const LOOSE_PHONE = /(?<!\d)(?:5\d{2}|0\d{2,3})(?:[\s-]?\d{2,3}){2,3}(?!\d)/gu;
 const noisePatterns = (line: string) =>
-  PHONE_CONTEXT.test(line) ? [LOOSE_PHONE, ...NOISE_PATTERNS] : NOISE_PATTERNS;
+  PHONE_CONTEXT.test(line) || !/\p{L}/u.test(line)
+    ? [LOOSE_PHONE, ...NOISE_PATTERNS]
+    : NOISE_PATTERNS;
+
+/** Noise spans, except numbers followed by a unit: those are quantities. */
+function findNoise(line: string): Span[] {
+  return collect(line, noisePatterns(line)).filter((s) => !unitAt(line.slice(s.end)));
+}
 
 const NUMBER_WORDS: Record<string, string> = {
   ერთი: "1",
@@ -385,7 +394,15 @@ function findCandidates(text: string): Candidate[] {
     let issue: string | undefined;
     if (m[1]) {
       quantity = normalizeQuantity(m[1].replace(/ /g, ""));
-      issue = `„${m[1]}“ წაკითხულია როგორც ${quantity}. შეამოწმეთ.`;
+      const groups = m[1].split(" ");
+      // "ბლოკი 20 100 ცალი": 20100 pieces, or a size 20 and 100 pieces? After a name, a leading
+      // group of 2-3 digits may well be a size, so ask. "2 500" (one digit) reads as thousands.
+      if (groups.length === 2 && groups[0]!.length >= 2 && hasLetters(text.slice(0, m.index))) {
+        issue = `„${m[1]}“: ${quantity} თუ ${groups[1]} (${groups[0]} ზომაა)? მიუთითეთ ზუსტი რაოდენობა.`;
+        quantity = null;
+      } else {
+        issue = `„${m[1]}“ წაკითხულია როგორც ${quantity}. შეამოწმეთ.`;
+      }
     } else if (m[2]) {
       const value = Number(m[2]) / Number(m[3]);
       quantity = Number.isFinite(value) ? normalizeQuantity(String(value)) : null;
@@ -590,13 +607,33 @@ function splitMaterials(segment: string): (ParsedItem | null)[] {
       : measured.slice(0, -1).map((c) => c.end);
     const parts = [0, ...cuts].map((from, i) => segment.slice(from, cuts[i] ?? segment.length));
     const items = parts.map(parseSegment);
-    if (items.every(isComplete)) {
-      for (const it of items) it.issues.push("ხაზიდან ამოცნობილია რამდენიმე პოზიცია. შეამოწმეთ.");
+    // Every part must be laid out like the first one: "ფიცარი 20 ცალი 6მ სიგრძის" would give a
+    // second part "6მ სიგრძის" with the quantity first, so it is one material with a length.
+    const sameLayout = parts.every((part) => {
+      const own = blank(part, collect(part, SPEC_PATTERNS));
+      const first = findCandidates(own).find((c) => c.unit);
+      return first !== undefined && hasLetters(own.slice(0, first.start)) !== quantityFirst;
+    });
+    // "ქვიშა 5 ტონა ანუ 3 კუბი" restates one amount; "ანუ" is not a material.
+    const restates = items.some((it) => it && RESTATEMENT.test(it.name));
+    if (items.every(isComplete) && sameLayout && !restates) {
+      // Without "და" or punctuation at a cut the boundary between names is a guess.
+      const separated = cuts.every(
+        (cut) =>
+          /(?:[.,;]|(?<!\p{L})და)\s*$/u.test(segment.slice(0, cut)) ||
+          /^\s*(?:[.,;]|და(?!\p{L}))/u.test(segment.slice(cut)),
+      );
+      for (const it of items) {
+        it.issues.push("ხაზიდან ამოცნობილია რამდენიმე პოზიცია. შეამოწმეთ.");
+        if (!separated && !it.flags.includes("name")) it.flags.push("name");
+      }
       return items;
     }
   }
   return [parseSegment(segment)];
 }
+
+const RESTATEMENT = /^(?:ანუ|ანდა|თუ|იგივე|ესე იგი|ე\.ი\.?)$/u;
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
@@ -639,7 +676,7 @@ export function parseMaterialText(input: string, today: string): ParseResult {
 
     const dateHits = findDates(body, today, base);
     for (const d of dateHits) dates.push({ value: d.value, lineNo, uncertain: d.uncertain });
-    const noise = collect(body, noisePatterns(body));
+    const noise = findNoise(body);
     const cleaned = blank(blank(body, dateHits), noise);
 
     if (GREETING.test(cleaned.trim()) && !/\d/.test(cleaned)) {
@@ -652,12 +689,15 @@ export function parseMaterialText(input: string, today: string): ParseResult {
       });
       return;
     }
-    const items = cleaned
-      .split(";")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .flatMap(splitOnCommas)
-      .filter((x): x is ParsedItem => x !== null);
+    // Digits without any words ("555 123 456", "12") name no material.
+    const items = !hasLetters(cleaned)
+      ? []
+      : cleaned
+          .split(";")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .flatMap(splitOnCommas)
+          .filter((x): x is ParsedItem => x !== null);
     if (items.length > 0) {
       lines.push({ lineNo, text, kind: "items", items });
       return;
@@ -668,7 +708,9 @@ export function parseMaterialText(input: string, today: string): ParseResult {
         ? "კონტაქტი ან დრო"
         : /[:：]\s*$/.test(body)
           ? "სათაური"
-          : "რაოდენობა არ არის. თუ ეს მასალაა, დაამატეთ პოზიციად.";
+          : !hasLetters(cleaned)
+            ? "მხოლოდ რიცხვებია, დასახელების გარეშე. თუ ეს მასალაა, დაამატეთ პოზიციად."
+            : "რაოდენობა არ არის. თუ ეს მასალაა, დაამატეთ პოზიციად.";
     lines.push({ lineNo, text, kind: "skipped", reason, content: body.slice(0, 200) });
   });
 

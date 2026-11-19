@@ -1,15 +1,23 @@
 import { createHash } from "node:crypto";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "@/lib/db";
 import { assertProductionEnv } from "@/lib/env";
 import { errors } from "@/lib/i18n/ka";
-import { consumeRateLimit } from "@/server/rate-limit";
+import { clearRateLimit, consumeRateLimit } from "@/server/rate-limit";
 
-/** Failed or successful sign-in attempts per account in 15 minutes. */
+/** Sign-in attempts per account in 15 minutes; a successful sign-in resets the count. */
 export const LOGIN_LIMIT_PER_ACCOUNT = 10;
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+
+function loginAccountKey(body: unknown): string | null {
+  const email = (body as { email?: unknown } | undefined)?.email;
+  if (typeof email !== "string" || !email.trim()) return null;
+  const hash = createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+  return `login-account:${hash}`;
+}
 
 assertProductionEnv();
 
@@ -69,16 +77,30 @@ export const auth = betterAuth({
   hooks: {
     // Per-account login limit on top of the per-IP one: guessing one account's password from
     // many addresses is slowed down too. The key is a hash, so emails are not stored here.
+    // Every attempt is counted before the password is checked (atomic, so parallel guesses
+    // cannot slip past), and a successful sign-in resets the count: only consecutive failures
+    // lock the account. While locked, even the right password is refused; checking it would
+    // tell a guesser when they found it.
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path !== "/sign-in/email") return;
-      const email = (ctx.body as { email?: unknown } | undefined)?.email;
-      if (typeof email !== "string" || !email.trim()) return;
-      const key = createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
+      const key = loginAccountKey(ctx.body);
+      if (!key) return;
       try {
-        await consumeRateLimit(`login-account:${key}`, LOGIN_LIMIT_PER_ACCOUNT, 15 * 60);
+        await consumeRateLimit(key, LOGIN_LIMIT_PER_ACCOUNT, LOGIN_WINDOW_SECONDS);
       } catch {
-        throw new APIError("TOO_MANY_REQUESTS", { message: errors.tooManyAttempts });
+        throw new APIError("TOO_MANY_REQUESTS", {
+          message: errors.accountLocked,
+          code: "ACCOUNT_LOCKED",
+        });
       }
+    }),
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-in/email") return;
+      // Reset only on success: resetting on other errors (e.g. a malformed request) would let
+      // a guesser clear the count between guesses.
+      if (isAPIError(ctx.context.returned)) return;
+      const key = loginAccountKey(ctx.body);
+      if (key) await clearRateLimit(key);
     }),
   },
   databaseHooks: {

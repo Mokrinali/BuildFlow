@@ -23,3 +23,8 @@ export async function consumeRateLimit(key: string, max: number, windowSeconds =
     RETURNING "count"`;
   if ((rows[0]?.count ?? 0) > max) throw new AppError("RATE_LIMITED", errors.tooManyAttempts);
 }
+
+/** Forget the attempts counted for `key`. */
+export async function clearRateLimit(key: string) {
+  await db.rateLimit.deleteMany({ where: { key: `app:${key}` } });
+}

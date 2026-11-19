@@ -40,7 +40,13 @@ export function LoginForm() {
     });
     setPending(false);
     if (error) {
-      setMessage(error.status === 429 ? errors.tooManyAttempts : errors.loginFailed);
+      setMessage(
+        error.code === "ACCOUNT_LOCKED"
+          ? errors.accountLocked
+          : error.status === 429
+            ? errors.tooManyAttempts
+            : errors.loginFailed,
+      );
       return;
     }
     router.replace("/");

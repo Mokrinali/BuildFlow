@@ -29,16 +29,20 @@ export function assertAdmin(actor: Actor): void {
  * - Same organization, not a member and not admin: FORBIDDEN.
  * - `requiredRoles`: the actor must hold at least one of them (admins pass).
  * - `write`: archived projects are read-only.
+ * - `lockForUpdate`: lock the project row exclusively, for changes to the project row itself.
+ *   Share-locking first and updating later deadlocks when two such transactions run together.
  */
 export async function requireProjectAccess(
   client: Db | Tx,
   actor: Actor,
   projectId: string,
-  opts: { requiredRoles?: ProjectRole[]; write?: boolean } = {},
+  opts: { requiredRoles?: ProjectRole[]; write?: boolean; lockForUpdate?: boolean } = {},
 ): Promise<ProjectAccess> {
   // Writers share-lock the project row: archiving (an UPDATE) waits for them, and a writer that
   // starts after an archive commits sees ARCHIVED. Outside a transaction this is a no-op.
-  if (opts.write) {
+  if (opts.lockForUpdate) {
+    await client.$queryRaw`SELECT 1 AS ok FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+  } else if (opts.write) {
     await client.$queryRaw`SELECT 1 AS ok FROM "Project" WHERE "id" = ${projectId} FOR SHARE`;
   }
   const project = await client.project.findUnique({

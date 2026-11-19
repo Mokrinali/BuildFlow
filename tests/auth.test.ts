@@ -193,6 +193,34 @@ describe("guessing limits (code review findings)", () => {
     )) as { status?: unknown; statusCode?: unknown } | null;
     expect(err).not.toBeNull();
     expect([err?.status, err?.statusCode]).toContain(429);
+    expect((err as { body?: { code?: string } }).body?.code).toBe("ACCOUNT_LOCKED");
+  });
+
+  it("does not count successful sign-ins toward the per-account limit", async () => {
+    await users.createUser(admin, {
+      name: "ხშირი შესვლა",
+      email: "frequent@test.example",
+      password: "temporary-pass-1",
+    });
+    const { LOGIN_LIMIT_PER_ACCOUNT } = await import("@/lib/auth");
+    for (let i = 0; i <= LOGIN_LIMIT_PER_ACCOUNT; i++) {
+      await expect(signIn("frequent@test.example", "temporary-pass-1")).resolves.toBeTruthy();
+    }
+  });
+
+  it("resets the failure count after a successful sign-in", async () => {
+    await users.createUser(admin, {
+      name: "შეცდომა და შესვლა",
+      email: "reset@test.example",
+      password: "temporary-pass-1",
+    });
+    const { LOGIN_LIMIT_PER_ACCOUNT } = await import("@/lib/auth");
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < LOGIN_LIMIT_PER_ACCOUNT - 1; i++) {
+        await signInFails("reset@test.example", `wrong-password-${round}-${i}`);
+      }
+      await expect(signIn("reset@test.example", "temporary-pass-1")).resolves.toBeTruthy();
+    }
   });
 });
 

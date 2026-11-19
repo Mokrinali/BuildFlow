@@ -97,7 +97,7 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
   const input = parseInput(projectInput, raw);
   try {
     return await db.$transaction(async (tx) => {
-      await requireProjectAccess(tx, actor, projectId, { write: true });
+      await requireProjectAccess(tx, actor, projectId, { write: true, lockForUpdate: true });
       const before = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
       if (before.name === input.name && before.address === input.address) return before;
       const project = await tx.project.update({ where: { id: projectId }, data: input });
@@ -122,7 +122,7 @@ export async function updateProject(actor: Actor, projectId: string, raw: unknow
 export async function setProjectArchived(actor: Actor, projectId: string, archived: boolean) {
   assertAdmin(actor);
   return db.$transaction(async (tx) => {
-    const access = await requireProjectAccess(tx, actor, projectId);
+    const access = await requireProjectAccess(tx, actor, projectId, { lockForUpdate: true });
     if (access.archived === archived) {
       return tx.project.findUniqueOrThrow({ where: { id: projectId } }); // already in that state
     }

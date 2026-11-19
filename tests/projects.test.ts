@@ -141,6 +141,32 @@ describe("project management", () => {
     expect(events.every((e) => e.actorId === admin.userId)).toBe(true);
   });
 
+  it("handles concurrent renames of one project without a deadlock", async () => {
+    // Several rounds: a deadlock needs both transactions to share-lock before either updates.
+    for (let round = 0; round < 5; round++) {
+      const results = await Promise.allSettled([
+        updateProject(admin, projectId, { name: `სახელი ა ${round}`, address: "მისამართი ა" }),
+        updateProject(admin, projectId, { name: `სახელი ბ ${round}`, address: "მისამართი ბ" }),
+      ]);
+      expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    }
+    const updates = await db.auditEvent.count({
+      where: { entityId: projectId, action: "project.updated" },
+    });
+    expect(updates).toBe(10);
+  });
+
+  it("archives once when two archive requests race", async () => {
+    await Promise.all([
+      setProjectArchived(admin, projectId, true),
+      setProjectArchived(admin, projectId, true),
+    ]);
+    const archived = await db.auditEvent.count({
+      where: { entityId: projectId, action: "project.archived" },
+    });
+    expect(archived).toBe(1);
+  });
+
   it("does not write events for no-op changes", async () => {
     await updateProject(admin, projectId, {
       name: "ვაკის ობიექტი",

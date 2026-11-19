@@ -225,7 +225,8 @@ describe("code review findings: no confident wrong quantities", () => {
       unit: "ცალი",
       flags: ["quantity"],
     });
-    expect(one("ბლოკი 12 500 ცალი").quantity).toBe("12500");
+    // After a name, "12 500" may be a size 12 and 500 pieces: asked, not guessed.
+    expect(one("ბლოკი 12 500 ცალი")).toMatchObject({ quantity: null, flags: ["quantity"] });
   });
 
   it("asks when a separator could be decimal or thousands", () => {
@@ -257,6 +258,57 @@ describe("code review findings: no confident wrong quantities", () => {
     ]);
     // A size after a count is not a second material.
     expect(itemsOf("ფიცარი 20 ცალი 6მ")).toHaveLength(1);
+  });
+
+  it("does not split one material described with two measures (second review)", () => {
+    // Length of the board, not a second material called "სიგრძის".
+    expect(one("ფიცარი 20 ცალი 6მ სიგრძის")).toMatchObject({
+      name: "ფიცარი სიგრძის",
+      quantity: "20",
+      unit: "ცალი",
+    });
+    // "ანუ" restates the same amount in another unit: one item, flagged.
+    const sand = one("ქვიშა 5 ტონა ანუ 3 კუბი");
+    expect(sand.name).toBe("ქვიშა ანუ");
+    expect(sand.flags).toContain("quantity");
+  });
+
+  it("flags names of parts split without a separator (second review)", () => {
+    const parts = itemsOf("ცემენტი 25 ტომარა ქვიშა 3 კუბი");
+    expect(parts.every((p) => p.flags.includes("name"))).toBe(true);
+    // An explicit "და" or full stop is a clear boundary.
+    for (const line of ["25 ტომარა ცემენტი და 3 კუბი ქვიშა", "ცემენტი 25 ტომარა. ქვიშა 3 კუბი."]) {
+      expect(
+        itemsOf(line).every((p) => p.flags.length === 0),
+        line,
+      ).toBe(true);
+    }
+  });
+
+  it("asks when space-grouped digits after a name may be a size and a quantity", () => {
+    expect(one("ბლოკი 20 100 ცალი")).toMatchObject({
+      quantity: null,
+      unit: "ცალი",
+      flags: ["quantity"],
+    });
+    // Both readings are offered.
+    expect(itemsOf("ბლოკი 20 100 ცალი")[0]!.issues.join(" ")).toContain("20100 თუ 100");
+    // A single leading digit is the usual thousands shape: read, but flagged.
+    expect(one("აგური 2 500 ც")).toMatchObject({ quantity: "2500", flags: ["quantity"] });
+    // Three groups are thousands, not a size.
+    expect(one("აგური 1 250 000 ცალი").quantity).toBe("1250000");
+  });
+
+  it("keeps phone-like material lines and skips bare numbers (second review)", () => {
+    expect(one("არმატურა 995 12 50 ღერი")).toMatchObject({ quantity: "50", unit: "ღერი" });
+    expect(one("ბლოკი 500 20 20 40 ცალი")).toMatchObject({ quantity: "40", unit: "ცალი" });
+    // A unit after the digits makes them a quantity, even in a mobile number's shape.
+    expect(one("ბლოკი 520 20 20 40 ცალი")).toMatchObject({ quantity: "40", unit: "ცალი" });
+    // No Georgian mobile number starts with 50: the digits stay for the user to check.
+    expect(parse("ბლოკი 500 20 20 40").lines[0]).toMatchObject({ kind: "items" });
+    expect(parse("555 123 456").lines[0]).toMatchObject({ kind: "skipped" });
+    expect(parse("+995 599 12 34 56").lines[0]).toMatchObject({ kind: "skipped" });
+    expect(parse("995599123456").lines[0]).toMatchObject({ kind: "skipped" });
   });
 
   it("does not swallow material lines as phone numbers", () => {
