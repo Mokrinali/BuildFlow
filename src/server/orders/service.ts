@@ -559,6 +559,7 @@ export async function getOrder(actor: Actor, orderId: string) {
     receivedBy: r.receivedBy.name,
     waybillNumber: r.waybillNumber,
     waybillDate: r.waybillDate,
+    rsChecked: r.rsCheckedAt !== null,
     isCorrectionOnly: r.items.every((ri) => ri.correctsId !== null),
     alsoOn: shared
       .filter((x) => x.waybillNumber === r.waybillNumber)

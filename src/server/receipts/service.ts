@@ -332,7 +332,13 @@ export const setWaybillInput = z.object({
  * Add or change the waybill of a delivery (later, when the supplier issues it). Receivers and
  * buyers may do it, also after the order is finished. Changing an existing waybill needs a reason.
  */
-export async function setReceiptWaybill(actor: Actor, receiptId: string, raw: unknown) {
+export async function setReceiptWaybill(
+  actor: Actor,
+  receiptId: string,
+  raw: unknown,
+  // Set by the RS.ge picker (src/server/rs/service.ts), never from form input.
+  rs?: { rsWaybillId: string },
+) {
   const input = parseInput(setWaybillInput, raw);
   return db.$transaction(async (tx) => {
     const receipt = await tx.receipt.findUnique({
@@ -370,7 +376,13 @@ export async function setReceiptWaybill(actor: Actor, receiptId: string, raw: un
     }
     await tx.receipt.update({
       where: { id: receipt.id },
-      data: { waybillNumber: number, waybillDate: input.waybillDate },
+      // A hand-entered waybill is no longer the one checked against RS.ge.
+      data: {
+        waybillNumber: number,
+        waybillDate: input.waybillDate,
+        rsWaybillId: rs?.rsWaybillId ?? null,
+        rsCheckedAt: rs ? new Date() : null,
+      },
     });
     await recordEvent(tx, actor, {
       entityType: "PurchaseOrder",
@@ -383,6 +395,7 @@ export async function setReceiptWaybill(actor: Actor, receiptId: string, raw: un
         from: receipt.waybillNumber,
         to: number,
         waybillDate: input.waybillDate?.toISOString().slice(0, 10) ?? null,
+        ...(rs ? { source: "rs.ge" } : {}),
       },
     });
     await recomputeRequestStatus(tx, actor, req);

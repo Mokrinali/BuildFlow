@@ -3,16 +3,21 @@
 import { useActionState, useId, useMemo, useState } from "react";
 import { Button, Card, FormMessage } from "@/components/ui";
 import { submitKeepingValues } from "@/components/keep-values";
-import { formatQuantity } from "@/lib/format";
+import { formatIsoDate, formatMoney, formatQuantity } from "@/lib/format";
+import { formatOrderNumber } from "@/lib/units";
 import { initialActionState } from "@/server/action-state";
 import type { ActionState } from "@/server/action-state";
+import type { RsListState } from "@/server/rs/view";
 import {
+  applyRsWaybillAction,
   cancelOrderAction,
   closeOrderAction,
   correctReceiptAction,
   createReceiptAction,
+  listRsWaybillsAction,
   setSupplierTaxIdAction,
   setWaybillAction,
+  verifyRsWaybillAction,
 } from "../actions";
 
 const inputClass =
@@ -540,5 +545,100 @@ export function SupplierTaxIdForm({
         </div>
       </form>
     </details>
+  );
+}
+
+const initialRsList: RsListState = { ok: false };
+
+/** Pick a delivery's waybill from the supplier's waybills on RS.ge (or the demo data). */
+export function RsWaybillPicker({
+  orderId,
+  receiptId,
+  demo,
+}: {
+  orderId: string;
+  receiptId: string;
+  demo: boolean;
+}) {
+  const [list, load, loading] = useActionState(listRsWaybillsAction, initialRsList);
+  const [applied, apply, applying] = useActionState(applyRsWaybillAction, initialActionState);
+  const id = useId();
+  const options = list.options ?? [];
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer text-sm font-semibold underline underline-offset-4">
+        RS.ge-დან არჩევა{demo && " (სადემონსტრაციო)"}
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <form action={load}>
+          <input type="hidden" name="receiptId" value={receiptId} />
+          <Button type="submit" variant="secondary" disabled={loading}>
+            {loading
+              ? "იტვირთება…"
+              : options.length
+                ? "სიის განახლება"
+                : "მომწოდებლის ზედნადებების ჩამოტვირთვა"}
+          </Button>
+        </form>
+        <FormMessage ok={list.ok} message={list.message} />
+        {options.length > 0 && (
+          <form action={apply} className="flex flex-col gap-2">
+            <input type="hidden" name="orderId" value={orderId} />
+            <input type="hidden" name="receiptId" value={receiptId} />
+            <fieldset className="flex flex-col gap-1">
+              <legend className="mb-1 text-xs font-medium">აირჩიეთ ამ მიწოდების ზედნადები</legend>
+              {options.map((w, i) => (
+                <label
+                  key={w.id}
+                  htmlFor={`${id}-${i}`}
+                  className="flex cursor-pointer items-start gap-2 rounded-md border border-line p-2 has-checked:border-navy"
+                >
+                  <input
+                    id={`${id}-${i}`}
+                    type="radio"
+                    name="rsWaybillId"
+                    value={w.id}
+                    required
+                    className="mt-1"
+                  />
+                  <span className="min-w-0">
+                    <strong>№{w.number}</strong>
+                    {w.date && `, ${formatIsoDate(w.date)}`}
+                    {w.amount && ` · ${formatMoney(w.amount, "GEL")}`}
+                    {w.closed && " · დასრულებული"}
+                    {w.usedOn.length > 0 && (
+                      <span className="block text-xs text-[#8a3f00]">
+                        უკვე მიბმულია: {w.usedOn.map((o) => formatOrderNumber(o.number)).join(", ")}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            <div>
+              <Button type="submit" disabled={applying}>
+                არჩეულის მითითება
+              </Button>
+            </div>
+            <FormMessage ok={applied.ok} message={applied.message} />
+          </form>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** Check a hand-entered waybill on RS.ge (exists, valid, issued by this supplier). */
+export function RsVerifyButton({ orderId, receiptId }: { orderId: string; receiptId: string }) {
+  const [state, action, pending] = useActionState(verifyRsWaybillAction, initialActionState);
+  return (
+    <form action={action} className="mt-2 flex flex-col items-start gap-2">
+      <input type="hidden" name="orderId" value={orderId} />
+      <input type="hidden" name="receiptId" value={receiptId} />
+      <Button type="submit" variant="secondary" disabled={pending}>
+        {pending ? "მოწმდება…" : "RS.ge-ზე შემოწმება"}
+      </Button>
+      <FormMessage ok={state.ok} message={state.message} />
+    </form>
   );
 }

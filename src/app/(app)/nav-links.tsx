@@ -9,7 +9,10 @@ const items = [
   { href: "/requests", label: "მოთხოვნები" },
   { href: "/orders", label: "შეკვეთები" },
 ];
-const adminItems = [{ href: "/users", label: "მომხმარებლები" }];
+const adminItems = [
+  { href: "/users", label: "მომხმარებლები" },
+  { href: "/rs", label: "RS.ge" },
+];
 
 export function NavLinks({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();

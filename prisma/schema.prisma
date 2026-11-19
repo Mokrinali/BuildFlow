@@ -67,6 +67,14 @@ enum CancellationSide {
   BUYER
 }
 
+// RS.ge waybill link of an organization: off by default; DEMO uses made-up waybills (for showing
+// the feature without a company account); LIVE calls the RS.ge WayBill service.
+enum RsMode {
+  OFF
+  DEMO
+  LIVE
+}
+
 enum Currency {
   GEL
   USD
@@ -76,13 +84,17 @@ enum Currency {
 // ─── Organization and users ──────────────────────────────────────────────────
 
 model Organization {
-  id         String   @id @default(cuid())
-  name       String
+  id                String   @id @default(cuid())
+  name              String
   // Per-organization counters for human-readable numbers (incremented in a transaction).
-  requestSeq Int      @default(0)
-  orderSeq   Int      @default(0)
-  createdAt  DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+  requestSeq        Int      @default(0)
+  orderSeq          Int      @default(0)
+  // RS.ge link. The service user's password is stored encrypted (src/server/rs/crypto.ts).
+  rsMode            RsMode   @default(OFF)
+  rsServiceUser     String?
+  rsServicePassword String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
 
   users     User[]
   projects  Project[]
@@ -353,6 +365,9 @@ model Receipt {
   // finished only when every delivery has one. Kept as plain fields for a later RS.ge link.
   waybillNumber String?
   waybillDate   DateTime? @db.Date
+  // Set when the waybill was taken from or checked against RS.ge (cleared on a manual change).
+  rsWaybillId   String?
+  rsCheckedAt   DateTime? @db.Timestamptz(3)
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
 
   order      PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)

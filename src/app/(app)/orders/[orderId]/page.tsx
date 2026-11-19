@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeliveryBadge } from "@/components/request-status";
-import { Card, PageHeader } from "@/components/ui";
+import { Badge, Card, PageHeader } from "@/components/ui";
 import {
   formatDateTime,
   formatMoney,
@@ -16,12 +16,15 @@ import { currencyLabel, eventLabel } from "@/lib/i18n/ka";
 import { formatOrderNumber, formatRequestNumber } from "@/lib/units";
 import { AppError } from "@/server/errors";
 import { getOrder } from "@/server/orders/service";
+import { getRsMode } from "@/server/rs/service";
 import { requireUser } from "@/server/session";
 import {
   CancelOrderForm,
   CloseOrderForm,
   CorrectReceiptForm,
   ReceiveForm,
+  RsVerifyButton,
+  RsWaybillPicker,
   SupplierTaxIdForm,
   WaybillForm,
 } from "./order-actions";
@@ -54,6 +57,8 @@ export default async function OrderPage({ params, searchParams }: Props) {
     throw e;
   }
   const { order, items, receipts, events, permissions, access } = data;
+  const rsMode = permissions.canEditWaybill ? await getRsMode(user.organizationId) : "OFF";
+  const rsReady = rsMode !== "OFF" && !!order.supplier.taxId;
   const money = (v: string) => formatMoney(v, order.currency);
 
   return (
@@ -234,10 +239,17 @@ export default async function OrderPage({ params, searchParams }: Props) {
                         <p className="mt-1">
                           ზედნადები:{" "}
                           {r.waybillNumber ? (
-                            <strong>
-                              №{r.waybillNumber}
-                              {r.waybillDate && `, ${formatWorkDate(r.waybillDate)}`}
-                            </strong>
+                            <>
+                              <strong>
+                                №{r.waybillNumber}
+                                {r.waybillDate && `, ${formatWorkDate(r.waybillDate)}`}
+                              </strong>
+                              {r.rsChecked && (
+                                <span className="ml-2">
+                                  <Badge tone="green">RS.ge-ზე შემოწმებულია</Badge>
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <strong className="text-red-800">აკლია</strong>
                           )}
@@ -259,6 +271,28 @@ export default async function OrderPage({ params, searchParams }: Props) {
                           ))}
                         </p>
                       )}
+                      {permissions.canEditWaybill && !r.isCorrectionOnly && rsReady && (
+                        <>
+                          {!r.waybillNumber && (
+                            <RsWaybillPicker
+                              orderId={order.id}
+                              receiptId={r.id}
+                              demo={rsMode === "DEMO"}
+                            />
+                          )}
+                          {r.waybillNumber && !r.rsChecked && (
+                            <RsVerifyButton orderId={order.id} receiptId={r.id} />
+                          )}
+                        </>
+                      )}
+                      {permissions.canEditWaybill &&
+                        !r.isCorrectionOnly &&
+                        rsMode !== "OFF" &&
+                        !order.supplier.taxId && (
+                          <p className="mt-1 text-xs text-steel-600">
+                            RS.ge-ზე მოსაძებნად მიუთითეთ მომწოდებლის საიდენტიფიკაციო კოდი.
+                          </p>
+                        )}
                       {permissions.canEditWaybill && !r.isCorrectionOnly && (
                         <WaybillForm
                           orderId={order.id}

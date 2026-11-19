@@ -7,6 +7,7 @@ import type {
   ProjectRole,
   ProjectStatus,
   RequestStatus,
+  RsMode,
 } from "@/generated/prisma/enums";
 
 export const orgRoleLabel: Record<OrgRole, string> = {
@@ -188,6 +189,7 @@ export const orderEventLabel: Record<string, string> = {
   "receipt.corrected": "მიღება შესწორდა",
   "receipt.waybill_set": "ზედნადები მიეთითა",
   "receipt.waybill_changed": "ზედნადები შეიცვალა",
+  "receipt.waybill_verified": "ზედნადები შემოწმდა RS.ge-ზე",
   "supplier.tax_id_set": "მომწოდებლის საიდენტიფიკაციო კოდი მიეთითა",
   "supplier.created": "მომწოდებელი დაემატა",
 };
@@ -199,3 +201,35 @@ export const orderEventLabel: Record<string, string> = {
 export function eventLabel(action: string, extra: Record<string, string> = {}): string {
   return extra[action] ?? requestEventLabel[action] ?? orderEventLabel[action] ?? "ცვლილება";
 }
+
+export const rsModeLabel: Record<RsMode, string> = {
+  OFF: "გამორთული",
+  DEMO: "სადემონსტრაციო",
+  LIVE: "რეალური (RS.ge)",
+};
+
+export const rsErrors = {
+  off: "RS.ge-სთან კავშირი გამორთულია. ადმინისტრატორს შეუძლია ჩართოს „RS.ge“ გვერდზე.",
+  userRequired: "მიუთითეთ RS.ge-ს სერვისის მომხმარებელი.",
+  passwordRequired: "მიუთითეთ სერვისის მომხმარებლის პაროლი.",
+  reenterPassword:
+    "RS.ge-ს სერვისის მომხმარებლის მონაცემები არასრულია. ადმინისტრატორმა ხელახლა შეიყვანოს პაროლი „RS.ge“ გვერდზე.",
+  badCredentials: "RS.ge-მ სერვისის მომხმარებელი ან პაროლი არ მიიღო.",
+  connected: "კავშირი RS.ge-სთან მუშაობს.",
+  demoConnected:
+    "სადემონსტრაციო რეჟიმი ჩართულია: ზედნადებები გამოგონილია, RS.ge-სთან კავშირი არ ხდება.",
+  timeout: "RS.ge არ პასუხობს. სცადეთ ცოტა ხანში.",
+  unreachable: "RS.ge-სთან დაკავშირება ვერ მოხერხდა. სცადეთ მოგვიანებით.",
+  fault: "RS.ge-მ მოთხოვნა არ მიიღო. შეამოწმეთ სერვისის მომხმარებელი „RS.ge“ გვერდზე.",
+  noSupplierTaxId: "RS.ge-ზე მოსაძებნად მიუთითეთ მომწოდებლის საიდენტიფიკაციო კოდი.",
+  pickedGone: "არჩეული ზედნადები RS.ge-ზე აღარ ჩანს. განაახლეთ სია.",
+  alreadyHasWaybill: "მიწოდებას უკვე აქვს ზედნადები. შესაცვლელად გამოიყენეთ „ზედნადების შეცვლა“.",
+  nothingToVerify: "მიწოდებას ზედნადები ჯერ არ აქვს.",
+  notFound: "RS.ge-ზე ზედნადები ამ ნომრით ვერ მოიძებნა.",
+  notValid: "RS.ge-ზე ეს ზედნადები გაუქმებული ან გაუაქტიურებელია.",
+  otherSupplier: (tin: string) => `ეს ზედნადები სხვა მომწოდებლისაა (ს/კ ${tin}).`,
+  changedMeanwhile: "ზედნადები შეიცვალა შემოწმების დროს. განაახლეთ გვერდი.",
+  verified: "ზედნადები RS.ge-ზე მოიძებნა და ემთხვევა მომწოდებელს.",
+  verifiedOtherDate: (date: string) =>
+    `ზედნადები RS.ge-ზე მოიძებნა, მაგრამ იქ თარიღია ${date}. შეამოწმეთ შეყვანილი თარიღი.`,
+};
