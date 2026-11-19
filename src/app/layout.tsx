@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_Georgian } from "next/font/google";
-import { connection } from "next/server";
 import { GeorgianValidation } from "@/components/georgian-validation";
 import "./globals.css";
 
@@ -27,10 +26,11 @@ export const viewport: Viewport = {
   themeColor: "#092648",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Render every page per request: the CSP nonce from src/proxy.ts only reaches the page's
-  // scripts in a request-time render; a page prerendered at build time would be blocked.
-  await connection();
+// Render every page per request: the CSP nonce from src/proxy.ts only reaches the page's scripts
+// in a request-time render; a page prerendered at build time would be blocked.
+export const dynamic = "force-dynamic";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ka" className={georgian.variable}>
       <body className="min-h-dvh font-sans antialiased">

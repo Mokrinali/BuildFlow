@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
-import { buildCsp, proxy } from "./proxy";
+import { buildCsp } from "@/lib/csp";
+import { proxy } from "./proxy";
 
 describe("content security policy", () => {
   it("allows only nonce-carrying scripts in production", () => {
