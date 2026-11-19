@@ -81,7 +81,7 @@ export default async function OrdersPage({ searchParams }: Props) {
       >
         <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor="f-q" className="text-xs font-medium">
-            ძიება (ნომერი ან მასალა)
+            ძიება (ნომერი, მასალა ან ზედნადები)
           </label>
           <input
             id="f-q"
