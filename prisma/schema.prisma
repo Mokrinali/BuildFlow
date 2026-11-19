@@ -345,9 +345,10 @@ model OrderItem {
   closedAt      DateTime? @db.Timestamptz(3)
   closeReason   String?
 
-  order        PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  requestItem  RequestItem   @relation(fields: [requestItemId], references: [id], onDelete: Restrict)
+  order        PurchaseOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  requestItem  RequestItem          @relation(fields: [requestItemId], references: [id], onDelete: Restrict)
   receiptItems ReceiptItem[]
+  waybillLines ReceiptWaybillLine[]
 
   @@unique([orderId, requestItemId])
   @@index([requestItemId])
@@ -370,9 +371,10 @@ model Receipt {
   rsCheckedAt   DateTime? @db.Timestamptz(3)
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
 
-  order      PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  receivedBy User          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
-  items      ReceiptItem[]
+  order        PurchaseOrder        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  receivedBy   User                 @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  items        ReceiptItem[]
+  waybillLines ReceiptWaybillLine[]
 
   @@index([orderId])
   @@index([waybillNumber])
@@ -392,6 +394,28 @@ model ReceiptItem {
   corrects    ReceiptItem?  @relation("ReceiptCorrection", fields: [correctsId], references: [id], onDelete: Restrict)
   corrections ReceiptItem[] @relation("ReceiptCorrection")
 
+  @@index([orderItemId])
+}
+
+// Goods lines of a delivery's RS.ge waybill, as RS.ge returned them, with the match to an order
+// line. Used to compare the waybill with what was received (warnings only, never a block) and to
+// suggest the same match next time for this supplier. `factor` converts the waybill unit to the
+// order unit (waybill quantity × factor); null when the units differ and nobody set it yet.
+model ReceiptWaybillLine {
+  id          String   @id @default(cuid())
+  receiptId   String
+  position    Int
+  name        String
+  unit        String
+  quantity    Decimal  @db.Decimal(18, 4)
+  unitPrice   Decimal? @db.Decimal(18, 4)
+  orderItemId String?
+  factor      Decimal? @db.Decimal(18, 6)
+
+  receipt   Receipt    @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@unique([receiptId, position])
   @@index([orderItemId])
 }
 

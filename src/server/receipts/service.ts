@@ -156,8 +156,27 @@ async function orderItemProgress(tx: Tx, orderId: string) {
   );
 }
 
-/** Record a delivery. Requires the RECEIVER role (admins pass). */
-export async function createReceipt(actor: Actor, raw: unknown) {
+/** Waybill goods lines stored with a delivery recorded from an RS.ge waybill. */
+export type WaybillLineInput = {
+  position: number;
+  name: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string | null;
+  orderItemId: string | null;
+  factor: string | null;
+};
+
+/**
+ * Record a delivery. Requires the RECEIVER role (admins pass). `rs` is set only by the RS.ge
+ * flow (src/server/rs/goods.ts), never from form input: the delivery then carries the RS.ge
+ * waybill and its goods lines with their matches to order lines.
+ */
+export async function createReceipt(
+  actor: Actor,
+  raw: unknown,
+  rs?: { rsWaybillId: string; lines: WaybillLineInput[] },
+) {
   const input = parseInput(createReceiptInput, raw);
   if (input.items.length === 0) throw new AppError("VALIDATION", errors.receiptNoItems);
   const ids = input.items.map((i) => i.orderItemId);
@@ -204,6 +223,8 @@ export async function createReceipt(actor: Actor, raw: unknown) {
         note: input.note,
         waybillNumber: input.waybillNumber,
         waybillDate: input.waybillNumber ? input.waybillDate : null,
+        rsWaybillId: rs?.rsWaybillId ?? null,
+        rsCheckedAt: rs ? new Date() : null,
         items: {
           create: input.items.map((it) => ({
             orderItemId: it.orderItemId,
@@ -211,6 +232,22 @@ export async function createReceipt(actor: Actor, raw: unknown) {
             note: it.note,
           })),
         },
+        ...(rs && rs.lines.length
+          ? {
+              waybillLines: {
+                create: rs.lines.map((l) => ({
+                  position: l.position,
+                  name: l.name,
+                  unit: l.unit,
+                  quantity: new Prisma.Decimal(l.quantity),
+                  unitPrice: l.unitPrice === null ? null : new Prisma.Decimal(l.unitPrice),
+                  // Only lines of this order (checked in progress above for received items).
+                  orderItemId: l.orderItemId && progress.has(l.orderItemId) ? l.orderItemId : null,
+                  factor: l.factor === null ? null : new Prisma.Decimal(l.factor),
+                })),
+              },
+            }
+          : {}),
       },
       select: { id: true },
     });
@@ -224,6 +261,7 @@ export async function createReceipt(actor: Actor, raw: unknown) {
         receivedOn: input.receivedOn.toISOString().slice(0, 10),
         waybillNumber: input.waybillNumber,
         items: input.items.map((it) => ({ orderItemId: it.orderItemId, quantity: it.quantity })),
+        ...(rs ? { source: "rs.ge", waybillLines: rs.lines.length } : {}),
       },
     });
     await recomputeRequestStatus(tx, actor, req);
@@ -384,6 +422,8 @@ export async function setReceiptWaybill(
         rsCheckedAt: rs ? new Date() : null,
       },
     });
+    // Goods lines belong to the old waybill; the RS.ge flow loads the new one's lines itself.
+    await tx.receiptWaybillLine.deleteMany({ where: { receiptId: receipt.id } });
     await recordEvent(tx, actor, {
       entityType: "PurchaseOrder",
       entityId: receipt.orderId,

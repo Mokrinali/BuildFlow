@@ -10,6 +10,7 @@ import { errors } from "@/lib/i18n/ka";
 import { isPositiveQuantity, normalizePrice, normalizeQuantity } from "@/lib/quantity";
 import { requireProjectAccess, type Actor, type ProjectAccess } from "@/server/access";
 import { recordEvent } from "@/server/audit";
+import { compareWaybill } from "@/server/rs/compare";
 import { AppError, notFound } from "@/server/errors";
 import {
   ORDERABLE,
@@ -503,6 +504,7 @@ export async function getOrder(actor: Actor, orderId: string) {
               corrections: { select: { quantity: true } },
             },
           },
+          waybillLines: { orderBy: { position: "asc" } },
         },
       },
     },
@@ -551,6 +553,7 @@ export async function getOrder(actor: Actor, orderId: string) {
         select: { waybillNumber: true, order: { select: { id: true, number: true } } },
       })
     : [];
+  const orderLines = new Map(items.map((it) => [it.id, { name: it.name, unit: it.unit }]));
   const receipts = order.receipts.map((r) => ({
     id: r.id,
     receivedOn: r.receivedOn,
@@ -560,6 +563,30 @@ export async function getOrder(actor: Actor, orderId: string) {
     waybillNumber: r.waybillNumber,
     waybillDate: r.waybillDate,
     rsChecked: r.rsCheckedAt !== null,
+    hasRsWaybill: r.rsWaybillId !== null,
+    waybillCompare: r.waybillLines.length
+      ? compareWaybill(
+          r.waybillLines.map((l) => ({
+            id: l.id,
+            position: l.position,
+            name: l.name,
+            unit: l.unit,
+            quantity: l.quantity.toString(),
+            unitPrice: l.unitPrice?.toString() ?? null,
+            orderItemId: l.orderItemId,
+            factor: l.factor?.toString() ?? null,
+          })),
+          r.items
+            .filter((ri) => ri.correctsId === null)
+            .map((ri) => ({
+              orderItemId: ri.orderItemId,
+              quantity: ri.quantity
+                .plus(sumDecimals(ri.corrections.map((c) => c.quantity)))
+                .toString(),
+            })),
+          orderLines,
+        )
+      : null,
     isCorrectionOnly: r.items.every((ri) => ri.correctsId !== null),
     alsoOn: shared
       .filter((x) => x.waybillNumber === r.waybillNumber)

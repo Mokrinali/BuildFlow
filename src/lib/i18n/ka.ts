@@ -190,6 +190,8 @@ export const orderEventLabel: Record<string, string> = {
   "receipt.waybill_set": "ზედნადები მიეთითა",
   "receipt.waybill_changed": "ზედნადები შეიცვალა",
   "receipt.waybill_verified": "ზედნადები შემოწმდა RS.ge-ზე",
+  "receipt.waybill_goods_loaded": "ზედნადების საქონელი ჩაიტვირთა RS.ge-დან",
+  "receipt.waybill_match_changed": "ზედნადების ხაზის მისადაგება შეიცვალა",
   "supplier.tax_id_set": "მომწოდებლის საიდენტიფიკაციო კოდი მიეთითა",
   "supplier.created": "მომწოდებელი დაემატა",
 };
@@ -230,6 +232,13 @@ export const rsErrors = {
   otherSupplier: (tin: string) => `ეს ზედნადები სხვა მომწოდებლისაა (ს/კ ${tin}).`,
   changedMeanwhile: "ზედნადები შეიცვალა შემოწმების დროს. განაახლეთ გვერდი.",
   verified: "ზედნადები RS.ge-ზე მოიძებნა და ემთხვევა მომწოდებელს.",
+  noGoods: "RS.ge-ზე ამ ზედნადებს საქონლის ხაზები არ აქვს.",
+  tooManyGoods: (max: number) => `ზედნადებში ${max}-ზე მეტი ხაზია. შეავსეთ მიწოდება ხელით.`,
+  badFactor: "კოეფიციენტი უნდა იყოს დადებითი რიცხვი (მაგ. 0,001 ან 25).",
+  notFromRs: "ამ მიწოდების ზედნადები RS.ge-დან არ არის არჩეული ან შემოწმებული.",
+  goodsLater:
+    "ზედნადების საქონლის სია ახლა ვერ ჩაიტვირთა. სცადეთ ღილაკით „საქონლის ჩატვირთვა“ ცოტა ხანში.",
+  matchSame: "მისადაგება არ შეცვლილა.",
   verifiedOtherDate: (date: string) =>
     `ზედნადები RS.ge-ზე მოიძებნა, მაგრამ იქ თარიღია ${date}. შეამოწმეთ შეყვანილი თარიღი.`,
 };

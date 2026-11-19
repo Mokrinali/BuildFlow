@@ -104,13 +104,15 @@ export async function saveRsSettings(actor: Actor, raw: unknown) {
 export async function testRsConnection(actor: Actor): Promise<string> {
   assertAdmin(actor);
   const { client, mode } = await clientFor(actor.organizationId);
-  await consumeRateLimit(`rs:${actor.organizationId}`, RS_CALLS_PER_MINUTE);
+  await rsRateLimit(actor.organizationId);
   const ok = await guard(() => client.checkUser());
   if (!ok) throw new AppError("VALIDATION", rsErrors.badCredentials);
   return mode === "DEMO" ? rsErrors.demoConnected : rsErrors.connected;
 }
 
-async function clientFor(organizationId: string): Promise<{ client: RsClient; mode: RsMode }> {
+export async function clientFor(
+  organizationId: string,
+): Promise<{ client: RsClient; mode: RsMode }> {
   const org = await db.organization.findUniqueOrThrow({
     where: { id: organizationId },
     select: { rsMode: true, rsServiceUser: true, rsServicePassword: true },
@@ -122,8 +124,13 @@ async function clientFor(organizationId: string): Promise<{ client: RsClient; mo
   return { client: makeLiveClient(org.rsServiceUser, password), mode: "LIVE" };
 }
 
+/** Count one RS.ge call against the organization's per-minute limit. */
+export async function rsRateLimit(organizationId: string) {
+  await consumeRateLimit(`rs:${organizationId}`, RS_CALLS_PER_MINUTE);
+}
+
 /** Turn RS.ge transport problems into Georgian messages. */
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
+export async function guard<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
@@ -183,7 +190,7 @@ function addDays(day: string, n: number): string {
 }
 
 /** Valid waybills: activated or closed (saved drafts, deleted and deactivated ones are not). */
-const usable = (w: RsWaybill) => w.status === "ACTIVE" || w.status === "CLOSED";
+export const usable = (w: RsWaybill) => w.status === "ACTIVE" || w.status === "CLOSED";
 
 export type RsWaybillOption = RsWaybill & {
   /** Orders in this organization whose deliveries already carry this waybill number. */
@@ -196,14 +203,27 @@ export async function listReceiptWaybills(
   receiptId: string,
 ): Promise<RsWaybillOption[]> {
   const receipt = await loadReceipt(actor, receiptId);
+  return (await supplierWaybills(actor, receipt.order)).options;
+}
+
+/**
+ * The supplier's usable RS.ge waybills from 14 days before the order until today, newest first,
+ * each with the orders whose deliveries already carry it. Also returns the client for follow-up
+ * calls. The caller has checked access and that the supplier has an identification code.
+ */
+export async function supplierWaybills(
+  actor: Actor,
+  order: { createdAt: Date; supplier: { id: string; name: string; taxId: string | null } },
+): Promise<{ options: RsWaybillOption[]; client: RsClient; mode: RsMode }> {
   const { client, mode } = await clientFor(actor.organizationId);
-  await consumeRateLimit(`rs:${actor.organizationId}`, RS_CALLS_PER_MINUTE);
-  const supplier = receipt.order.supplier;
-  const from = addDays(todayInTbilisi(receipt.order.createdAt), -LOOKBACK_DAYS);
-  const list = (await guard(() => client.buyerWaybills(supplier.taxId!, from, todayInTbilisi())))
+  await rsRateLimit(actor.organizationId);
+  const supplier = order.supplier;
+  const taxId = supplier.taxId!;
+  const from = addDays(todayInTbilisi(order.createdAt), -LOOKBACK_DAYS);
+  const list = (await guard(() => client.buyerWaybills(taxId, from, todayInTbilisi())))
     .filter(usable)
     // A live answer is filtered by seller code already; keep the check in case it is not.
-    .filter((w) => !w.sellerTin || w.sellerTin === supplier.taxId)
+    .filter((w) => !w.sellerTin || w.sellerTin === taxId)
     .map((w) => (mode === "DEMO" ? { ...w, sellerName: supplier.name } : w))
     .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 
@@ -214,13 +234,14 @@ export async function listReceiptWaybills(
     },
     select: { waybillNumber: true, order: { select: { id: true, number: true } } },
   });
-  return list.map((w) => ({
+  const options = list.map((w) => ({
     ...w,
     usedOn: used
       .filter((u) => u.waybillNumber === w.number)
       .map((u) => u.order)
       .filter((o, i, all) => all.findIndex((x) => x.id === o.id) === i),
   }));
+  return { options, client, mode };
 }
 
 /** Put a waybill picked from RS.ge on a delivery that has none yet. */
@@ -249,7 +270,7 @@ export async function verifyReceiptWaybill(actor: Actor, receiptId: string): Pro
   const receipt = await loadReceipt(actor, receiptId);
   if (!receipt.waybillNumber) throw new AppError("VALIDATION", rsErrors.nothingToVerify);
   const { client } = await clientFor(actor.organizationId);
-  await consumeRateLimit(`rs:${actor.organizationId}`, RS_CALLS_PER_MINUTE);
+  await rsRateLimit(actor.organizationId);
   const supplier = receipt.order.supplier;
   const w = await guard(() => client.waybillByNumber(receipt.waybillNumber!, supplier.taxId!));
   if (!w) throw new AppError("VALIDATION", rsErrors.notFound);

@@ -163,3 +163,75 @@ export async function callRs(
   if (!res.ok) throw new RsTransportError(/<faultstring/i.test(body) ? "fault" : "http");
   return parseXml(body);
 }
+
+// ─── Goods lines of one waybill (get_waybill) ────────────────────────────────
+
+/** One goods line of a waybill. Quantities and prices as decimal strings. */
+export type RsGoods = {
+  name: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string | null;
+};
+
+/**
+ * RS.ge unit codes (get_waybill_units). Not confirmed against a live account: the unit text
+ * (UNIT_TXT) is preferred whenever the answer carries one, and an unknown code stays visible.
+ */
+const RS_UNITS: Record<string, string> = {
+  "1": "ცალი",
+  "2": "კგ",
+  "3": "გ",
+  "4": "ლიტრი",
+  "5": "ტონა",
+  "7": "სმ",
+  "8": "მ",
+  "9": "კმ",
+  "10": "სმ²",
+  "11": "მ²",
+  "12": "მ³",
+  "13": "მლ",
+};
+
+const decimal = (v: string) => {
+  const s = v.replace(/\s/g, "").replace(",", ".");
+  return /^\d{1,14}(\.\d+)?$/.test(s) ? s : null;
+};
+
+/** Up to 4 decimals (the precision stored for waybill lines), rounded half up. */
+function round4(s: string): string {
+  const [i = "0", f = ""] = s.split(".");
+  if (f.length <= 4) return f.replace(/0+$/, "") ? `${i}.${f.replace(/0+$/, "")}` : i;
+  const scaled = BigInt(i + f.slice(0, 4)) + (Number(f[4]) >= 5 ? 1n : 0n);
+  const t = scaled.toString().padStart(5, "0");
+  const out = `${t.slice(0, -4)}.${t.slice(-4)}`.replace(/0+$/, "").replace(/\.$/, "");
+  return out;
+}
+
+/** All goods lines (objects with a W_NAME field) anywhere in the tree, in document order. */
+export function collectGoods(node: Node): RsGoods[] {
+  const out: RsGoods[] = [];
+  const visit = (n: Node) => {
+    if (Array.isArray(n)) return n.forEach(visit);
+    if (!n || typeof n !== "object") return;
+    const upper = Object.fromEntries(Object.entries(n).map(([k, v]) => [k.toUpperCase(), v]));
+    if ("W_NAME" in upper) {
+      const name = text(upper.W_NAME);
+      const quantity = decimal(text(upper.QUANTITY));
+      if (name && quantity) {
+        const price = decimal(text(upper.PRICE));
+        const unitCode = text(upper.UNIT_ID);
+        out.push({
+          name: name.slice(0, 300),
+          unit: (text(upper.UNIT_TXT) || RS_UNITS[unitCode] || `ერთეული ${unitCode}`).slice(0, 40),
+          quantity: round4(quantity),
+          unitPrice: price ? round4(price) : null,
+        });
+      }
+      return;
+    }
+    Object.values(n).forEach(visit);
+  };
+  visit(node);
+  return out;
+}

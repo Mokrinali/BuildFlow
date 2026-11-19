@@ -224,6 +224,7 @@ describe("live mode (fake client)", () => {
       checkUser: async () => ok,
       buyerWaybills: async () => list,
       waybillByNumber: async (n) => list.find((w) => w.number === n) ?? null,
+      waybillGoods: async () => [],
     };
   }
 

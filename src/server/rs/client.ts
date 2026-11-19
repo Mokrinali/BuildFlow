@@ -3,13 +3,22 @@
 // account. Both are read-only: BuildFlow never creates, confirms or rejects waybills on RS.ge.
 import { createHash } from "node:crypto";
 import { todayInTbilisi } from "@/lib/format";
+import { canonicalUnit, mulDecimal } from "@/lib/unit-convert";
 import {
   callRs,
+  collectGoods,
   collectWaybills,
   findKey,
   RsTransportError,
+  type RsGoods,
   type RsWaybill,
 } from "@/server/rs/soap";
+
+/**
+ * What the delivery is expected to hold (order lines and quantities). Only the demo client uses
+ * it, to make up goods that look like the order; the live client reads the real waybill.
+ */
+export type RsGoodsHint = { name: string; unit: string; quantity: string; unitPrice: string };
 
 export interface RsClient {
   /** True when the service user and password are accepted. */
@@ -18,6 +27,8 @@ export interface RsClient {
   buyerWaybills(sellerTin: string, from: string, to: string): Promise<RsWaybill[]>;
   /** One waybill by its number, or null. `sellerTin` only narrows the demo data. */
   waybillByNumber(number: string, sellerTin: string): Promise<RsWaybill | null>;
+  /** Goods lines of one waybill (by its RS.ge id). */
+  waybillGoods(waybill: Pick<RsWaybill, "id" | "number">, hint: RsGoodsHint[]): Promise<RsGoods[]>;
 }
 
 // ─── Live ────────────────────────────────────────────────────────────────────
@@ -65,6 +76,12 @@ export function liveClient(su: string, sp: string, fetchImpl: typeof fetch = fet
       if (result === undefined) return null;
       return collectWaybills(result).find((w) => w.number === number) ?? null;
     },
+    async waybillGoods(waybill) {
+      const body = await callRs("get_waybill", [...auth, ["waybill_id", waybill.id]], fetchImpl);
+      const result = findKey(body, "get_waybillResult");
+      assertNoErrorCode(result);
+      return result === undefined ? [] : collectGoods(result);
+    },
   };
 }
 
@@ -98,6 +115,27 @@ export function demoWaybills(sellerTin: string, today = todayInTbilisi()): RsWay
   });
 }
 
+/**
+ * Made-up goods of a demo waybill, shaped like the expected delivery so that matching can be
+ * shown: tonnes are written in kilograms (as suppliers often do), and on some waybills one line
+ * is 10% short, so the comparison has something to warn about. Stable per waybill number.
+ */
+export function demoGoods(waybillNumber: string, hint: RsGoodsHint[]): RsGoods[] {
+  const h = createHash("sha256").update(`goods|${waybillNumber}`).digest();
+  const short = h.readUInt8(0) % 2 === 0 && hint.length ? h.readUInt8(1) % hint.length : -1;
+  return hint.map((g, i) => {
+    let quantity = i === short ? mulDecimal(g.quantity, "0.9") : g.quantity;
+    let unit = g.unit;
+    let unitPrice = g.unitPrice;
+    if (canonicalUnit(unit) === "ტონა") {
+      unit = "კგ";
+      quantity = mulDecimal(quantity, "1000");
+      unitPrice = mulDecimal(unitPrice, "0.001", 4);
+    }
+    return { name: g.name, unit, quantity, unitPrice };
+  });
+}
+
 export function demoClient(today?: string): RsClient {
   return {
     async checkUser() {
@@ -108,6 +146,9 @@ export function demoClient(today?: string): RsClient {
     },
     async waybillByNumber(number, sellerTin) {
       return demoWaybills(sellerTin, today).find((w) => w.number === number) ?? null;
+    },
+    async waybillGoods(waybill, hint) {
+      return demoGoods(waybill.number, hint);
     },
   };
 }

@@ -7,7 +7,9 @@ import { formatIsoDate, formatMoney, formatQuantity } from "@/lib/format";
 import { formatOrderNumber } from "@/lib/units";
 import { initialActionState } from "@/server/action-state";
 import type { ActionState } from "@/server/action-state";
-import type { RsListState } from "@/server/rs/view";
+import { sumDecimal } from "@/lib/unit-convert";
+import type { RsGoodsPreviewState, RsListState } from "@/server/rs/view";
+import { convertedOf, RsFillPicker, WaybillMapping, type Fill } from "./rs-goods";
 import {
   applyRsWaybillAction,
   cancelOrderAction,
@@ -15,6 +17,7 @@ import {
   correctReceiptAction,
   createReceiptAction,
   listRsWaybillsAction,
+  previewWaybillGoodsAction,
   setSupplierTaxIdAction,
   setWaybillAction,
   verifyRsWaybillAction,
@@ -25,17 +28,40 @@ const inputClass =
 
 type ReceivableItem = { id: string; name: string; unit: string; remaining: string };
 
-/** Record a delivery: one quantity per order line (empty = not delivered this time). */
+const initialPreview: RsGoodsPreviewState = { ok: false };
+
+/** Received quantity per order line from the matched waybill lines (empty when none). */
+function quantitiesFrom(fill: Fill): Record<string, string> {
+  const out: Record<string, Record<number, string>> = {};
+  for (const l of fill.lines) {
+    const c = convertedOf(l);
+    if (c !== null && l.orderItemId) (out[l.orderItemId] ??= {})[l.position] = c;
+  }
+  return Object.fromEntries(
+    Object.entries(out).map(([id, parts]) => [id, sumDecimal(Object.values(parts))]),
+  );
+}
+
+/**
+ * Record a delivery: one quantity per order line (empty = not delivered this time). With RS.ge
+ * on, the form can be filled from a supplier's waybill whose lines the receiver matches first.
+ */
 export function ReceiveForm({
   orderId,
   items,
   today,
+  rs,
 }: {
   orderId: string;
   items: ReceivableItem[];
   today: string;
+  rs?: { demo: boolean } | null;
 }) {
   const [state, action, pending] = useActionState(createReceiptAction, initialActionState);
+  const [preview, loadPreview, previewPending] = useActionState(
+    previewWaybillGoodsAction,
+    initialPreview,
+  );
   const uid = useId();
   const open = items.filter((i) => i.remaining !== "0");
   const [receivedOn, setReceivedOn] = useState(today);
@@ -43,6 +69,7 @@ export function ReceiveForm({
   const [waybillNumber, setWaybillNumber] = useState("");
   const [waybillDate, setWaybillDate] = useState(today);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [fill, setFill] = useState<Fill | null>(null);
   // After a successful save the remaining quantities change: clear the inputs once per result.
   const [seenState, setSeenState] = useState(state);
   if (state !== seenState) {
@@ -51,6 +78,27 @@ export function ReceiveForm({
       setQuantities({});
       setNote("");
       setWaybillNumber("");
+      setFill(null);
+    }
+  }
+  // A loaded waybill fills the waybill fields and the quantities (once per result).
+  const [seenPreview, setSeenPreview] = useState(preview);
+  if (preview !== seenPreview) {
+    setSeenPreview(preview);
+    if (preview.ok && preview.preview) {
+      const p = preview.preview;
+      const next: Fill = {
+        waybill: p.waybill,
+        lines: p.lines.map((l) => ({
+          ...l,
+          orderItemId: open.some((o) => o.id === l.orderItemId) ? l.orderItemId : null,
+          factor: l.factor ?? "",
+        })),
+      };
+      setFill(next);
+      setWaybillNumber(p.waybill.number);
+      if (p.waybill.date) setWaybillDate(p.waybill.date);
+      setQuantities(quantitiesFrom(next));
     }
   }
 
@@ -70,10 +118,20 @@ export function ReceiveForm({
         waybillNumber,
         waybillDate: waybillNumber.trim() ? waybillDate : "",
         items: sent,
+        ...(fill
+          ? {
+              rsWaybillId: fill.waybill.id,
+              matches: fill.lines.map((l) => ({
+                position: l.position,
+                orderItemId: l.orderItemId,
+                factor: l.orderItemId && l.factor.trim() ? l.factor : null,
+              })),
+            }
+          : {}),
       }),
       sentToItem: map,
     };
-  }, [open, quantities, receivedOn, note, waybillNumber, waybillDate]);
+  }, [open, quantities, receivedOn, note, waybillNumber, waybillDate, fill]);
 
   const itemErrors = useMemo(() => {
     const out: Record<string, string> = {};
@@ -96,6 +154,27 @@ export function ReceiveForm({
         შეიყვანეთ ფაქტობრივად მიღებული რაოდენობა. ცარიელი ველი ნიშნავს, რომ ეს პოზიცია ამჯერად არ
         მოსულა.
       </p>
+      {rs && (
+        <RsFillPicker
+          orderId={orderId}
+          demo={rs.demo}
+          previewAction={loadPreview}
+          previewPending={previewPending}
+          previewMessage={preview}
+        />
+      )}
+      {fill && (
+        <WaybillMapping
+          fill={fill}
+          lines={open}
+          onChange={(lines) => {
+            const next = { ...fill, lines };
+            setFill(next);
+            setQuantities(quantitiesFrom(next));
+          }}
+          onClear={() => setFill(null)}
+        />
+      )}
       <form action={action} className="flex flex-col gap-4">
         <input type="hidden" name="orderId" value={orderId} />
         <input type="hidden" name="payload" value={payload} />
@@ -109,7 +188,11 @@ export function ReceiveForm({
               inputMode="numeric"
               maxLength={40}
               value={waybillNumber}
-              onChange={(e) => setWaybillNumber(e.target.value)}
+              onChange={(e) => {
+                setWaybillNumber(e.target.value);
+                // Another number is no longer the RS.ge waybill whose lines were matched.
+                if (fill && e.target.value.trim() !== fill.waybill.number) setFill(null);
+              }}
               aria-invalid={fe.waybillNumber ? true : undefined}
               aria-describedby={`${uid}-wb-hint${fe.waybillNumber ? ` ${uid}-wb-err` : ""}`}
               className={inputClass}

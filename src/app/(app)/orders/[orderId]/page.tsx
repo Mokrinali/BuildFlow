@@ -28,6 +28,8 @@ import {
   SupplierTaxIdForm,
   WaybillForm,
 } from "./order-actions";
+import { RsLoadGoodsButton } from "./rs-goods";
+import { WaybillCompare } from "./waybill-compare";
 
 export const metadata: Metadata = { title: "შეკვეთა" };
 
@@ -57,9 +59,13 @@ export default async function OrderPage({ params, searchParams }: Props) {
     throw e;
   }
   const { order, items, receipts, events, permissions, access } = data;
-  const rsMode = permissions.canEditWaybill ? await getRsMode(user.organizationId) : "OFF";
+  const rsMode =
+    permissions.canEditWaybill || permissions.canReceive
+      ? await getRsMode(user.organizationId)
+      : "OFF";
   const rsReady = rsMode !== "OFF" && !!order.supplier.taxId;
   const money = (v: string) => formatMoney(v, order.currency);
+  const orderLineOptions = items.map((it) => ({ id: it.id, name: it.name, unit: it.unit }));
 
   return (
     <>
@@ -216,7 +222,12 @@ export default async function OrderPage({ params, searchParams }: Props) {
           </Card>
 
           {permissions.canReceive && (
-            <ReceiveForm orderId={order.id} items={items} today={todayInTbilisi()} />
+            <ReceiveForm
+              orderId={order.id}
+              items={items}
+              today={todayInTbilisi()}
+              rs={rsReady ? { demo: rsMode === "DEMO" } : null}
+            />
           )}
 
           <Card>
@@ -283,7 +294,22 @@ export default async function OrderPage({ params, searchParams }: Props) {
                           {r.waybillNumber && !r.rsChecked && (
                             <RsVerifyButton orderId={order.id} receiptId={r.id} />
                           )}
+                          {r.waybillNumber && r.hasRsWaybill && (
+                            <RsLoadGoodsButton
+                              orderId={order.id}
+                              receiptId={r.id}
+                              again={!!r.waybillCompare}
+                            />
+                          )}
                         </>
+                      )}
+                      {r.waybillCompare && (
+                        <WaybillCompare
+                          orderId={order.id}
+                          compare={r.waybillCompare}
+                          orderLines={orderLineOptions}
+                          canEdit={permissions.canEditWaybill}
+                        />
                       )}
                       {permissions.canEditWaybill &&
                         !r.isCorrectionOnly &&
